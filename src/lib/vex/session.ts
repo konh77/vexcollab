@@ -1,0 +1,300 @@
+/*
+ * VEXCollab - live session with a VEX V5 brain over WebSerial.
+ * Licensed under AGPL-3.0-only.
+ *
+ * This wraps the vendored MIT `v5-serial-protocol` library (see
+ * src/lib/v5-serial-protocol/VENDORED.md) in a small observable store that
+ * React can subscribe to. Nothing here is derived from VEX Robotics' own
+ * tooling; it speaks the same wire protocol, which is what "native" means.
+ */
+'use client';
+
+import {
+  FileDownloadTarget,
+  FileVendor,
+  SmartDeviceType,
+  type SlotNumber,
+  type ZerobaseSlotNumber,
+} from '@/lib/v5-serial-protocol/Vex';
+import { V5SerialDevice } from '@/lib/v5-serial-protocol/VexDevice';
+import { ProgramIniConfig } from '@/lib/v5-serial-protocol/VexIniConfig';
+import { ScreenCaptureH2DPacket } from '@/lib/v5-serial-protocol/VexPacket';
+import { EMPTY_SNAPSHOT, type BrainSnapshot, type UploadRequest } from './types';
+import { decodeScreenCapture, SCREEN_CAPTURE_BYTES } from './screen';
+
+const VEX_USB_VENDOR_ID = 0x2888;
+
+function smartDeviceName(type: SmartDeviceType | undefined): string {
+  if (type === undefined) return 'Unknown';
+  const name = SmartDeviceType[type];
+  if (!name) return `Type ${type}`;
+  // MOTOR_29 -> Motor 29
+  return name
+    .toLowerCase()
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+export class V5Session {
+  private device: V5SerialDevice | null = null;
+  private listeners = new Set<() => void>();
+  private snapshot: BrainSnapshot = EMPTY_SNAPSHOT;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  static isSupported(): boolean {
+    return typeof navigator !== 'undefined' && 'serial' in navigator;
+  }
+
+  constructor() {
+    if (!V5Session.isSupported()) {
+      this.snapshot = { ...EMPTY_SNAPSHOT, connectionState: 'unsupported' };
+    }
+  }
+
+  // --- store plumbing -----------------------------------------------------
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  getSnapshot = (): BrainSnapshot => this.snapshot;
+
+  private patch(next: Partial<BrainSnapshot>) {
+    this.snapshot = { ...this.snapshot, ...next };
+    this.listeners.forEach((l) => l());
+  }
+
+  private fail(error: unknown, context: string) {
+    const message = error instanceof Error ? error.message : String(error);
+    this.patch({ lastError: `${context}: ${message}` });
+    return null;
+  }
+
+  clearError() {
+    this.patch({ lastError: null });
+  }
+
+  // --- connection ---------------------------------------------------------
+
+  async connect(): Promise<boolean> {
+    if (!V5Session.isSupported()) return false;
+    if (this.snapshot.connectionState === 'connected') return true;
+
+    this.patch({ connectionState: 'connecting', lastError: null });
+    try {
+      const device = new V5SerialDevice(navigator.serial);
+      const ok = await device.connect();
+      if (!ok) {
+        this.patch({ connectionState: 'disconnected' });
+        return false;
+      }
+      this.device = device;
+      this.patch({ connectionState: 'connected' });
+      await this.refresh();
+      await this.refreshPrograms();
+      // The brain does not push state, so poll for battery/program changes.
+      this.pollTimer = setInterval(() => void this.refresh(), 2000);
+      return true;
+    } catch (error) {
+      this.patch({ connectionState: 'disconnected' });
+      this.fail(error, 'Connect failed');
+      return false;
+    }
+  }
+
+  async disconnect() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    try {
+      await this.device?.disconnect();
+    } catch {
+      // Unplugging mid-session throws here; the state reset below is what matters.
+    }
+    this.device = null;
+    this.snapshot = { ...EMPTY_SNAPSHOT };
+    this.listeners.forEach((l) => l());
+  }
+
+  /** Pull a fresh view of brain state. Safe to call on a timer. */
+  async refresh() {
+    const device = this.device;
+    if (!device?.isConnected) return;
+
+    try {
+      await device.refresh();
+      const brain = device.brain;
+
+      const [brainName, teamNumber] = await Promise.all([
+        brain.getValue('robotname').catch(() => null),
+        brain.getValue('teamnumber').catch(() => null),
+      ]);
+
+      this.patch({
+        isV5Controller: device.isV5Controller,
+        brainName: brainName ? String(brainName) : null,
+        teamNumber: teamNumber ? String(teamNumber) : null,
+        uniqueId: brain.uniqueId ?? null,
+        systemVersion: brain.systemVersion ? String(brain.systemVersion) : null,
+        cpu0Version: brain.cpu0Version ? String(brain.cpu0Version) : null,
+        cpu1Version: brain.cpu1Version ? String(brain.cpu1Version) : null,
+        batteryPercent: brain.battery.batteryPercent ?? null,
+        isCharging: Boolean(brain.battery.isCharging),
+        activeProgram: brain.activeProgram ?? 0,
+        isRunningProgram: brain.isRunningProgram,
+        radio: {
+          isAvailable: Boolean(device.radio.isAvailable),
+          isConnected: Boolean(device.radio.isConnected),
+          isVexNet: Boolean(device.radio.isVexNet),
+          channel: device.radio.channel != null ? String(device.radio.channel) : null,
+          latency: device.radio.latency ?? null,
+        },
+        devices: device.devices
+          .filter((d) => d.isAvailable)
+          .map((d) => ({
+            port: d.port ?? 0,
+            type: smartDeviceName(d.type),
+            version: d.version != null ? String(d.version) : '-',
+          })),
+        controllers: device.controllers
+          .filter((c) => c.isAvailable)
+          .map((c, index) => ({
+            index,
+            isMaster: Boolean(c.isMasterController),
+            batteryPercent: c.batteryPercent ?? 0,
+            isCharging: Boolean(c.isCharging),
+          })),
+      });
+    } catch (error) {
+      this.fail(error, 'Refresh failed');
+    }
+  }
+
+  async refreshPrograms() {
+    const device = this.device;
+    if (!device?.isConnected) return;
+    try {
+      const programs = (await device.brain.listProgram()) ?? [];
+      this.patch({
+        programs: programs.map((p) => ({
+          name: p.name,
+          binfile: p.binfile,
+          slot: p.slot + 1,
+          size: p.size,
+          time: p.time instanceof Date ? p.time.toISOString() : String(p.time),
+        })),
+      });
+    } catch (error) {
+      this.fail(error, 'Reading program slots failed');
+    }
+  }
+
+  // --- program control ----------------------------------------------------
+
+  async runProgram(slot: SlotNumber) {
+    const conn = this.device?.connection;
+    if (!conn) return;
+    try {
+      await conn.loadProgram(slot);
+      await this.refresh();
+    } catch (error) {
+      this.fail(error, `Running slot ${slot} failed`);
+    }
+  }
+
+  async stopProgram() {
+    const conn = this.device?.connection;
+    if (!conn) return;
+    try {
+      await conn.stopProgram();
+      await this.refresh();
+    } catch (error) {
+      this.fail(error, 'Stopping the program failed');
+    }
+  }
+
+  // --- upload -------------------------------------------------------------
+
+  async upload(request: UploadRequest): Promise<boolean> {
+    const device = this.device;
+    if (!device?.isConnected) return false;
+
+    const ini = new ProgramIniConfig();
+    ini.autorun = true;
+    ini.baseName = `slot_${request.slot}`;
+    ini.project.ide = 'VEXCollab';
+    ini.program.name = request.name.slice(0, 32);
+    ini.program.description = request.description.slice(0, 256);
+    ini.program.slot = (request.slot - 1) as ZerobaseSlotNumber;
+    ini.program.icon = 'USER902x.bmp';
+    ini.setProgramDate(new Date());
+
+    this.patch({ transfer: { label: 'Starting', current: 0, total: 1 }, lastError: null });
+    try {
+      const ok = await device.brain.uploadProgram(
+        ini,
+        request.payload,
+        request.coldPayload,
+        (label, current, total) => this.patch({ transfer: { label, current, total } }),
+      );
+      if (ok) await this.refreshPrograms();
+      return Boolean(ok);
+    } catch (error) {
+      this.fail(error, 'Upload failed');
+      return false;
+    } finally {
+      this.patch({ transfer: null });
+    }
+  }
+
+  // --- screen capture -----------------------------------------------------
+
+  /** Grabs the brain's framebuffer and returns it as a PNG data URL. */
+  async captureScreen(): Promise<string | null> {
+    const conn = this.device?.connection;
+    if (!conn) return null;
+
+    this.patch({ transfer: { label: 'Screen', current: 0, total: SCREEN_CAPTURE_BYTES }, lastError: null });
+    try {
+      await conn.writeDataAsync(new ScreenCaptureH2DPacket(0));
+      const raw = await conn.downloadFileToHost(
+        { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0, size: SCREEN_CAPTURE_BYTES },
+        FileDownloadTarget.FILE_TARGET_CBUF,
+        (current, total) => this.patch({ transfer: { label: 'Screen', current, total } }),
+      );
+      return decodeScreenCapture(raw);
+    } catch (error) {
+      this.fail(error, 'Screen capture failed');
+      return null;
+    } finally {
+      this.patch({ transfer: null });
+    }
+  }
+
+  // --- brain identity -----------------------------------------------------
+
+  async setBrainName(name: string) {
+    try {
+      await this.device?.brain.setValue('robotname', name);
+      await this.refresh();
+    } catch (error) {
+      this.fail(error, 'Setting brain name failed');
+    }
+  }
+
+  async setTeamNumber(team: string) {
+    try {
+      await this.device?.brain.setValue('teamnumber', team);
+      await this.refresh();
+    } catch (error) {
+      this.fail(error, 'Setting team number failed');
+    }
+  }
+
+  static readonly VEX_USB_VENDOR_ID = VEX_USB_VENDOR_ID;
+}

@@ -1,0 +1,63 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-shell: #0b0e14;
+  --color-panel: #11151f;
+  --color-panel-raised: #171c28;
+  --color-edge: #232a3a;
+  --color-ink: #e6e9f0;
+  --color-ink-dim: #8b93a7;
+  --color-vex: #d22630;
+  --color-vex-soft: #ff5560;
+  --color-ok: #3ecf8e;
+  --color-warn: #f0b429;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-shell);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Remote collaborator cursors. y-monaco tags decorations with per-client
+ * classes; EditorPane injects the matching colour rules at runtime.
+ */
+.yRemoteSelection {
+  border-radius: 2px;
+}
+
+.yRemoteSelectionHead {
+  position: absolute;
+  box-sizing: border-box;
+  height: 100%;
+  border-left: 2px solid;
+  border-top: 2px solid;
+  border-bottom: 2px solid;
+}
+
+.yRemoteSelectionHead::after {
+  position: absolute;
+  content: attr(data-name);
+  top: -1.15em;
+  left: -2px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1.15em;
+  white-space: nowrap;
+  border-radius: 3px 3px 3px 0;
+  color: #0b0e14;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.vc-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge) transparent;
+}

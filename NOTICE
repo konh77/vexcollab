@@ -1,0 +1,49 @@
+VEXCollab
+Copyright (C) 2026 VEXCollab contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See LICENSE for the full text.
+
+--------------------------------------------------------------------------------
+Third-party work and where this project came from
+--------------------------------------------------------------------------------
+
+1. CodeX - https://github.com/dulapahv/CodeX
+   Copyright (c) Dulapah Vibulsanti. Licensed under AGPL-3.0.
+
+   VEXCollab was written after studying CodeX and takes its product idea
+   directly: a no-sign-up, link-shareable, real-time collaborative code editor
+   built on Monaco and Yjs. The source here was written fresh rather than
+   forked - different architecture (single Next.js app with an in-process
+   Socket.IO relay, rather than a pnpm/Turborepo split client and server) and a
+   different purpose (VEX V5 robotics). VEXCollab is nonetheless released under
+   AGPL-3.0, the same license as CodeX, so that the lineage stays honest and
+   nothing is taken from that project's community.
+
+2. v5-serial-protocol - https://github.com/Jerrylum/v5-serial-protocol
+   Copyright (c) 2022 Jerry Lum. Licensed under MIT.
+
+   Vendored verbatim (plus one `@ts-nocheck` pragma per file) into
+   src/lib/v5-serial-protocol/. That directory carries its own LICENSE and a
+   VENDORED.md explaining the details. MIT permits this and is compatible with
+   AGPL-3.0.
+
+--------------------------------------------------------------------------------
+Relationship to VEX Robotics
+--------------------------------------------------------------------------------
+
+VEXCollab is an independent, unofficial project. It is not affiliated with,
+endorsed by, or supported by VEX Robotics or Innovation First International.
+
+It contains no code, assets, firmware, SDK, or binaries from VEXcode, the VEX
+Visual Studio Code extension, or any other VEX product. The VEX extension is
+distributed under a proprietary license that forbids decompiling, reverse
+engineering, and redistribution; none of that was done, and nothing from it
+was consulted while writing this. Communication with a V5 brain is implemented
+against an independent MIT implementation of the USB packet protocol (item 2
+above).
+
+"VEX", "VEX V5", and "VEXcode" are trademarks of Innovation First International
+and are used here only to describe what this software interoperates with.
