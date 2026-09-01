@@ -1,175 +1,140 @@
 # VEXCollab
 
-A real-time collaborative code editor for **VEX V5 Python** that talks to the robot
-brain from the browser — no desktop IDE, no toolchain, no accounts.
-
-Your whole team opens one link and types in the same file with live cursors. When
-you are ready, the same tab connects to a V5 brain over USB (WebSerial), uploads
-your program to a slot, runs it, and streams whatever it prints back into a
-terminal panel.
-
-The V5 runs Python on-board, which is what makes this possible: there is no compile
-step to shell out to, so the entire edit → upload → run loop fits in a web page.
-
-## Run it
-
-One line, on any machine with Node 20+:
+**Google Docs for VEX V5 Python.** Your team edits one file together in the browser,
+then uploads it straight to the brain over USB. No IDE, no toolchain, no accounts.
 
 ```bash
 npx github:ponpon77/vexcollab
 ```
 
-It builds on first run, then prints the links to share:
+That's it. It prints two links:
 
 ```
-  On this computer   http://localhost:3000
-  On your Wi-Fi      http://192.168.0.211:3000
+  On this computer   http://localhost:3000     ← the one plugged into the brain
+  On your Wi-Fi      http://192.168.0.211:3000 ← send this to your team
 ```
 
-Anyone on the same Wi-Fi opens that second link and is in the room. To require a
-password:
+Open the first, hit **Start a room**, send the link. Everyone types at once.
+
+> **Needs Chrome, Edge, or Opera** for the USB parts (Safari and Firefox don't support
+> WebSerial). Node 20+ to run it. First run takes ~2 minutes to build; after that, 2 seconds.
+
+---
+
+## What you get
+
+**Write together**
+- Everyone's cursor and selection, live, in their own colour with their name on it
+- Shared file tree with folders
+- Rooms are just links — no sign-up, nothing saved to disk, gone when everyone leaves
+
+**Talk to the brain** — click *Connect USB*
+- Battery, vexOS version, brain name, team number (edit them in place)
+- Every smart port: what's plugged in, where, and its firmware
+- Controller battery and radio status
+- Upload your program to any slot, run it, stop it
+- Screenshot the brain's screen
+- Live terminal of everything your program prints, and type back to it
+- Update vexOS
+
+**Ship it**
+- Commit and push the room to a real GitHub repo, or pull your teammate's work in
+- Uses *your* git — no tokens to paste
+
+---
+
+## Add a password
 
 ```bash
 npx github:ponpon77/vexcollab --password pit22
 ```
 
-Other flags: `--port 4000`, `--help`. From a clone, `npm install && npm run dev`
-does the same thing.
+Gates the page *and* the connection behind it. Do this if you're on school or venue Wi-Fi.
 
-> **The brain only works from `http://localhost`.** Browsers refuse USB access on
-> plain-http LAN addresses, so teammates can edit from anywhere on the Wi-Fi, but
-> the machine with the cable does the uploading. That is a browser security rule,
-> not something this app can opt out of.
+Other flags: `--port 4000`, `--help`.
 
 ---
 
-## What's in it
+## Three things to know
 
-**Collaboration**
-- Multiple people editing the same files, with live remote cursors and selections —
-  everyone's caret shows in their own colour with their name on it
-- Shared file tree with folders — add and delete files, everyone sees it instantly
-- Optional password (`--password` or `VEXCOLLAB_PASSWORD`) gating both the page and
-  the collaboration socket
-- Rooms are just links. No sign-up, and nothing is written to disk: a room lives in
-  server memory and disappears when the last person leaves
-- Conflict-free merging via [Yjs](https://github.com/yjs/yjs) CRDTs over Socket.IO
+**Only the computer with the cable can use the brain.** Teammates on the Wi-Fi can edit
+everything, but browsers block USB on non-`localhost` addresses. So one person uploads.
+That's a browser rule, not a missing feature.
 
-**The brain, connected natively**
-- Connect over USB with the Web Serial API — no extension, no native helper
-- Live brain state: vexOS and CPU versions, battery and charge state, unique ID,
-  brain name and team number (both editable inline)
-- Every device in the smart ports, with port number, type, and firmware version
-- Controller battery and radio status (VEXnet/Bluetooth, channel, latency)
-- Program slots: list what's on the brain, run a slot, stop the running program
-- Upload `main.py` straight into a slot with a name, description, and progress
-- Update vexOS, fetched live from VEX's own release catalogue
-- Capture the brain's LCD as a PNG
-- A user-port terminal: your program's output, and stdin back to it
-
-**Project workflow**
-- **Folders and modules.** The V5 has no module system for user code — a program is
-  a single payload, so `import drive` cannot resolve on the brain. VEXCollab bundles
-  instead: every `.py` file is concatenated at upload time, modules first (path
-  order) and `main.py` last, sharing one global namespace. So a function in
-  `lib/drive.py` is callable from `main.py` with no import line. Names are global,
-  so two files defining `reset()` will collide — last one wins.
-- **Git.** Commit the room to a real repository and push it, or pull a teammate's
-  work back into the room. It shells out to your own `git` with whatever credentials
-  your credential helper or SSH agent already has — no tokens are asked for or
-  stored. Set `VEXCOLLAB_PROJECT_DIR` to choose the working directory (default
-  `./vex-project`).
-
-## Requirements
-
-WebSerial only exists in Chromium browsers, so **Chrome, Edge, or Opera on desktop**
-for anything involving the brain. Safari and Firefox have not shipped the API and
-have no plans to. The editor half works everywhere.
-
-Node 20+ to run the server.
-
-## How it fits together
+**Folders work, but there's no `import`.** The V5 stores a program as one file, so
+`import drive` can't work on the brain. Instead, every `.py` file is glued together at
+upload time — modules first, `main.py` last:
 
 ```
-server.mjs                Next.js + a Socket.IO relay in one process.
-                          Holds the authoritative Y.Doc per room in memory.
-
-src/lib/collab/           Client side of that: CollabProvider wires a Y.Doc and
-                          awareness to the socket. Small on purpose — the server
-                          hands a joiner the whole document in the join ack
-                          instead of running a sync handshake.
-
-src/lib/vex/              Everything V5. `session.ts` is an observable store over
-                          the brain; `terminal.ts` owns the *other* USB serial
-                          interface so the console keeps working during uploads;
-                          `screen.ts` decodes the framebuffer.
-
-src/lib/v5-serial-protocol/   Vendored MIT protocol implementation. See
-                              VENDORED.md in that directory.
-
-src/components/           UI. EditorPane is Monaco + y-monaco + per-client cursor
-                          colours; BrainPanel is the whole right-hand rail.
+main.py          ← runs last
+lib/drive.py     ← its functions are just... available in main.py
+lib/auton.py
 ```
 
-A V5 brain enumerates **two** USB serial interfaces. One carries the packet
-protocol (system info, file transfer, program control); the other is a plain
-115200-baud stream carrying `print()` output. VEXCollab opens them separately, so
-uploading does not interrupt the terminal.
+A function in `lib/drive.py` is callable from `main.py` with no import line. The catch:
+everything shares one namespace, so two files defining `reset()` will clash.
 
-## Status — what is and isn't verified
+**The editor needs internet on first load.** Monaco is pulled from a CDN, so the very
+first time a browser opens a room it needs a connection. Everything else — the
+collaboration, the brain, uploads — is entirely local. If you're heading to a venue with
+no Wi-Fi, open a room once at home on each laptop first so it's cached. Bundling Monaco
+locally would remove this; it's not done yet.
 
-Being straight about this, because robotics code that "probably works" wastes
-everyone's afternoon.
+---
 
-**Verified working:** the collaborative editor, multi-peer sync, live cursors, the
-file tree, room lifecycle, and the production build. Tested with multiple
-simultaneous clients.
+## Does it actually work?
 
-**Written against a documented protocol but not yet run against real hardware:**
-everything in the Brain panel. It was developed without a V5 on the desk. The
-protocol layer underneath is a real, independently-tested MIT implementation, so
-the wire format is not guesswork — but the specific flows (upload, screen capture,
-program control) deserve a careful first run with a brain you don't mind
-power-cycling.
+Straight answer, because robotics code that "should work" wastes your afternoon.
 
-Two things to watch on that first run:
+**Tested and working:** the editor, live cursors, multi-person sync, the file tree, the
+password, the Wi-Fi sharing, the one-line install, Git commit/push/pull, and the
+vexOS download path.
 
-1. **Python program packaging.** The brain stores a program as a payload plus an
-   `.ini` descriptor, and VEXcode's exact container for Python source is not
-   publicly documented. VEXCollab writes the UTF-8 source as the payload. If your
-   brain rejects it, the *Runtime image (advanced)* field in the upload section
-   lets you point at the shared runtime image from your own VEXcode install — it
-   is read locally and never bundled or redistributed here.
-2. **Framebuffer channel order.** Screen capture assumes 32-bit little-endian
-   pixels (B, G, R, unused) on a 512-pixel stride. If your screenshots come out
-   with swapped colours, that constant is one line in `src/lib/vex/screen.ts`.
+**Not yet run against a real brain:** everything in the Brain panel. It's built on a
+proven, independent implementation of VEX's USB protocol, so the wire format isn't
+guesswork — but the first upload deserves a brain you don't mind power-cycling. Two
+specifics to watch:
 
-Issues and PRs with hardware findings are very welcome — that is exactly the gap.
+1. **Python upload.** VEX's exact container for Python source isn't publicly documented.
+   If your brain rejects the upload, *Runtime image (advanced)* lets you point at the
+   runtime from your own VEXcode install.
+2. **Screenshot colours.** If they come out with red and blue swapped, that's one
+   constant in `src/lib/vex/screen.ts`.
 
-**vexOS updates** go through `/api/vexos/*`, which proxies VEX's public release
-catalogue server-side. VEX's CDN sends no CORS headers, so a browser cannot read it
-directly. The route is a pass-through at your request — nothing is cached, stored, or
-re-hosted, only `catalog.txt` and `*.vexos` are reachable, and no VEX firmware is
-bundled in this repository. Flashing is behind a two-step confirmation because an
-interrupted flash can leave a brain unbootable.
+Issues with hardware findings are very welcome — that's exactly the gap.
 
-**Known limitation:** Monaco is loaded from a CDN by `@monaco-editor/react`, so the
-first load of a room needs internet even though everything else is local. Bundling
-Monaco's workers locally is the fix; it is not done yet.
+**Careful with vexOS updates.** Flashing rewrites the brain's boot image. Charged
+battery, good cable, don't unplug. It's behind a two-step confirm for that reason.
 
-## Licensing, honestly
+---
 
-VEXCollab is **AGPL-3.0**. If you run a modified copy as a network service, you owe
-your users the source.
+## Configuration
 
-It takes its product idea from [CodeX](https://github.com/dulapahv/CodeX) by
-Dulapah Vibulsanti, which is AGPL-3.0, and is licensed the same way in return.
+| Variable | Does what | Default |
+| --- | --- | --- |
+| `PORT` | Port to serve on | `3000` |
+| `VEXCOLLAB_PASSWORD` | Require a password | none |
+| `VEXCOLLAB_PROJECT_DIR` | Where Git commits go | `./vex-project` |
 
-It contains **nothing** from VEX Robotics' own software. The VEX VS Code extension
-is proprietary and its license forbids decompiling, reverse engineering, and
-redistribution — so none of that happened here. Brain communication is built on an
-independent MIT implementation of the USB protocol.
+## From source
 
-Full detail in [`NOTICE`](./NOTICE).
+```bash
+git clone https://github.com/ponpon77/vexcollab && cd vexcollab
+npm install && npm run dev
+```
 
-VEXCollab is unofficial and not affiliated with or endorsed by VEX Robotics.
+`server.mjs` runs Next.js and the collaboration socket in one process. `src/lib/vex/`
+is everything V5, `src/lib/collab/` is everything multiplayer. See
+[CLAUDE.md](./CLAUDE.md) for the architecture and the traps.
+
+## Licence
+
+**AGPL-3.0.** Run a modified copy as a network service and you owe your users the source.
+
+Takes its idea from [CodeX](https://github.com/dulapahv/CodeX) (AGPL-3.0) and is licensed
+the same way in return. Brain communication is built on
+[v5-serial-protocol](https://github.com/Jerrylum/v5-serial-protocol) (MIT).
+
+**Contains nothing from VEX Robotics' software.** Their VS Code extension is proprietary
+and its licence forbids decompiling and redistribution — none of that happened here.
+Unofficial, and not affiliated with or endorsed by VEX Robotics. Full detail in [NOTICE](./NOTICE).
