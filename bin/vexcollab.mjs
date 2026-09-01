@@ -77,8 +77,17 @@ if (pkgRoot.includes(`${sep}node_modules${sep}`)) {
     mkdirSync(appDir, { recursive: true });
     cpSync(pkgRoot, appDir, {
       recursive: true,
-      filter: (src) => !src.includes(`${sep}node_modules`) && !src.includes(`${sep}.next`),
+      // Match on the path *relative* to the package: pkgRoot itself lives under
+      // node_modules, so testing the absolute path rejects everything.
+      filter: (src) => {
+        const rel = src.slice(pkgRoot.length);
+        return !rel.includes(`${sep}node_modules`) && !rel.includes(`${sep}.next`);
+      },
     });
+    if (!existsSync(join(appDir, 'package.json'))) {
+      console.error(`\n  Copy to ${appDir} produced no package.json - cannot continue.\n`);
+      process.exit(1);
+    }
     run(npm.cmd, [...npm.pre, 'install', '--omit=dev', '--no-audit', '--no-fund'], appDir);
     writeFileSync(stampFile, stamp);
   }
