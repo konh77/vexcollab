@@ -80,6 +80,25 @@ sudo systemctl restart vexcollab
 Upgrade by re-running the installer — it is idempotent and keeps your password
 and data.
 
+## If the Pi goes silent during install
+
+Normal. `next build` is the heaviest step, and on a Pi it takes 10–25 minutes
+with the whole box slowed to a crawl. The installer adds 2 GB of swap and caps
+Node's heap first so it survives, but SSH may still be sluggish or briefly
+unresponsive while it runs.
+
+If the Pi answers ping/ARP but refuses SSH for more than about 30 minutes, the
+build probably got OOM-killed. Power-cycle, then:
+
+```bash
+ssh <you>@vexcollab.local
+dmesg | grep -i 'killed process'      # confirms it was memory
+free -h                                # confirms swap exists
+```
+
+Then re-run the installer (Option B) — it is idempotent and will pick up where
+it left off.
+
 ## Honest limits
 
 - **This has not been run on real hardware.** It was written carefully against
@@ -90,3 +109,5 @@ and data.
   thing to check.
 - Rooms live in memory. Restarting the service ends any unsaved session, which
   is why *Save session to GitHub* exists.
+- A Pi with less than 1 GB of RAM is not really enough to build on. If you have
+  one, build on your laptop and copy `.next` across instead.

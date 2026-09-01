@@ -65,9 +65,55 @@ else
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
-log "Building (a few minutes on a Pi)"
-sudo -u "$APP_USER" env HOME=/var/lib/vexcollab npm --prefix "$APP_DIR" ci --omit=dev --no-audit --no-fund
-sudo -u "$APP_USER" env HOME=/var/lib/vexcollab NODE_ENV=production npm --prefix "$APP_DIR" run build
+# --- make the build survivable ----------------------------------------------
+# `next build` is by far the heaviest thing here. On a Pi with 1-2 GB it will
+# thrash or get OOM-killed, taking the network down with it - which looks
+# exactly like the Pi having died. Give it swap and a heap ceiling first.
+TOTAL_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+log "Detected ${TOTAL_MB} MB of RAM"
+
+if [ "$TOTAL_MB" -lt 3000 ]; then
+  WANT_SWAP=2048
+  CURRENT_SWAP=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo)
+  if [ "$CURRENT_SWAP" -lt "$WANT_SWAP" ]; then
+    log "Raising swap to ${WANT_SWAP} MB so the build does not get OOM-killed"
+    if [ -f /etc/dphys-swapfile ]; then
+      sed -i "s/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=${WANT_SWAP}/" /etc/dphys-swapfile
+      sed -i "s/^#\?CONF_MAXSWAP=.*/CONF_MAXSWAP=${WANT_SWAP}/" /etc/dphys-swapfile
+      dphys-swapfile swapoff || true
+      dphys-swapfile setup
+      dphys-swapfile swapon
+    fi
+  fi
+fi
+
+# Leave headroom for the kernel and sshd, so the box stays reachable while it
+# builds. Below ~1.5 GB the build is slow but no longer fatal.
+if [ "$TOTAL_MB" -lt 1500 ]; then
+  HEAP=768
+elif [ "$TOTAL_MB" -lt 3000 ]; then
+  HEAP=1024
+else
+  HEAP=2048
+fi
+
+log "Installing dependencies"
+sudo -u "$APP_USER" env HOME=/var/lib/vexcollab \
+  npm --prefix "$APP_DIR" ci --omit=dev --no-audit --no-fund
+
+log "Building with a ${HEAP} MB heap cap - 10 to 25 minutes on a Pi, and the Pi will be slow"
+# nice/ionice keep sshd responsive so you can watch it happen.
+if ! nice -n 10 ionice -c3 sudo -u "$APP_USER" env \
+      HOME=/var/lib/vexcollab \
+      NODE_ENV=production \
+      NEXT_TELEMETRY_DISABLED=1 \
+      NODE_OPTIONS="--max-old-space-size=${HEAP}" \
+      npm --prefix "$APP_DIR" run build; then
+  echo
+  echo "  The build failed. On a small Pi this is usually memory." >&2
+  echo "  Check: dmesg | grep -i 'killed process'" >&2
+  exit 1
+fi
 
 # --- configuration ----------------------------------------------------------
 # The room password is generated once and then left alone across upgrades.
