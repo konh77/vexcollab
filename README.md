@@ -11,20 +11,46 @@ terminal panel.
 The V5 runs Python on-board, which is what makes this possible: there is no compile
 step to shell out to, so the entire edit → upload → run loop fits in a web page.
 
+## Run it
+
+One line, on any machine with Node 20+:
+
 ```bash
-npm install
-npm run dev     # http://localhost:3000
+npx github:ponpon77/vexcollab
 ```
 
-Then open the room link on a second machine and start typing.
+It builds on first run, then prints the links to share:
+
+```
+  On this computer   http://localhost:3000
+  On your Wi-Fi      http://192.168.0.211:3000
+```
+
+Anyone on the same Wi-Fi opens that second link and is in the room. To require a
+password:
+
+```bash
+npx github:ponpon77/vexcollab --password pit22
+```
+
+Other flags: `--port 4000`, `--help`. From a clone, `npm install && npm run dev`
+does the same thing.
+
+> **The brain only works from `http://localhost`.** Browsers refuse USB access on
+> plain-http LAN addresses, so teammates can edit from anywhere on the Wi-Fi, but
+> the machine with the cable does the uploading. That is a browser security rule,
+> not something this app can opt out of.
 
 ---
 
 ## What's in it
 
 **Collaboration**
-- Multiple people editing the same files, with live remote cursors and selections
-- Shared file tree — add and delete files, everyone sees it instantly
+- Multiple people editing the same files, with live remote cursors and selections —
+  everyone's caret shows in their own colour with their name on it
+- Shared file tree with folders — add and delete files, everyone sees it instantly
+- Optional password (`--password` or `VEXCOLLAB_PASSWORD`) gating both the page and
+  the collaboration socket
 - Rooms are just links. No sign-up, and nothing is written to disk: a room lives in
   server memory and disappears when the last person leaves
 - Conflict-free merging via [Yjs](https://github.com/yjs/yjs) CRDTs over Socket.IO
@@ -40,6 +66,19 @@ Then open the room link on a second machine and start typing.
 - Update vexOS, fetched live from VEX's own release catalogue
 - Capture the brain's LCD as a PNG
 - A user-port terminal: your program's output, and stdin back to it
+
+**Project workflow**
+- **Folders and modules.** The V5 has no module system for user code — a program is
+  a single payload, so `import drive` cannot resolve on the brain. VEXCollab bundles
+  instead: every `.py` file is concatenated at upload time, modules first (path
+  order) and `main.py` last, sharing one global namespace. So a function in
+  `lib/drive.py` is callable from `main.py` with no import line. Names are global,
+  so two files defining `reset()` will collide — last one wins.
+- **Git.** Commit the room to a real repository and push it, or pull a teammate's
+  work back into the room. It shells out to your own `git` with whatever credentials
+  your credential helper or SSH agent already has — no tokens are asked for or
+  stored. Set `VEXCOLLAB_PROJECT_DIR` to choose the working directory (default
+  `./vex-project`).
 
 ## Requirements
 

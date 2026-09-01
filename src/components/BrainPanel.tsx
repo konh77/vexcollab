@@ -15,9 +15,9 @@ const SLOTS: SlotNumber[] = [1, 2, 3, 4, 5, 6, 7, 8];
 interface Props {
   session: V5Session;
   snapshot: BrainSnapshot;
-  /** Reads the current contents of the program file out of the shared doc. */
-  getSource: () => string;
-  sourcePath: string;
+  /** Bundles every .py file in the room into the program to upload. */
+  getProgram: () => string;
+  programFileCount: number;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -38,7 +38,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) {
+export function BrainPanel({ session, snapshot, getProgram, programFileCount }: Props) {
   const [slot, setSlot] = useState<SlotNumber>(1);
   const [programName, setProgramName] = useState('VEXCollab');
   const [description, setDescription] = useState('Uploaded from the browser');
@@ -87,7 +87,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
         slot,
         name: programName,
         description,
-        payload: pythonPayload(getSource()),
+        payload: pythonPayload(getProgram()),
         coldPayload,
       });
     } finally {
@@ -271,9 +271,12 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 className="w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 outline-none focus:border-vex"
               />
 
-              <p className="text-xs text-ink-dim">
-                Uploads <span className="font-medium text-ink">{sourcePath}</span> as the program
-                in slot {slot}.
+              <p className="text-xs leading-relaxed text-ink-dim">
+                Bundles{' '}
+                <span className="font-medium text-ink">
+                  {programFileCount} Python file{programFileCount === 1 ? '' : 's'}
+                </span>{' '}
+                into one program in slot {slot} — modules first, <code>main.py</code> last.
               </p>
 
               <details className="text-xs text-ink-dim">

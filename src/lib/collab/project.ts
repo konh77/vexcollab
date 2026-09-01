@@ -55,6 +55,34 @@ export function deleteFile(doc: Y.Doc, path: string) {
   doc.transact(() => getFiles(doc).delete(path));
 }
 
+/** Every file in the room, for bundling into one program. */
+export function readAllFiles(doc: Y.Doc): { path: string; contents: string }[] {
+  return listPaths(doc).map((path) => ({ path, contents: readFile(doc, path) }));
+}
+
+/**
+ * Applies files pulled from Git into the room. Existing files are rewritten in
+ * place inside one transaction so collaborators see a single change, not a
+ * flicker of empty documents.
+ */
+export function applyIncomingFiles(doc: Y.Doc, incoming: { path: string; contents: string }[]) {
+  const files = getFiles(doc);
+  doc.transact(() => {
+    for (const file of incoming) {
+      const existing = files.get(file.path);
+      if (existing) {
+        if (existing.toString() === file.contents) continue;
+        existing.delete(0, existing.length);
+        existing.insert(0, file.contents);
+      } else {
+        const text = new Y.Text();
+        text.insert(0, file.contents);
+        files.set(file.path, text);
+      }
+    }
+  });
+}
+
 export function readFile(doc: Y.Doc, path: string): string {
   return getFiles(doc).get(path)?.toString() ?? '';
 }

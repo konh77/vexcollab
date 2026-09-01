@@ -7,10 +7,12 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
-import { readFile } from '@/lib/collab/project';
+import { readAllFiles } from '@/lib/collab/project';
+import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { FileSidebar } from './FileSidebar';
+import { GitPanel } from './GitPanel';
 import { TerminalPane } from './TerminalPane';
 
 // Monaco reaches for `window` as soon as it is imported, so the editor can only
@@ -31,10 +33,13 @@ export function Workspace({ roomId }: { roomId: string }) {
   const [showTerminal, setShowTerminal] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  const getSource = useCallback(
-    () => (doc ? readFile(doc, PROGRAM_FILE) : ''),
+  // Every .py file in the room becomes one program; see bundlePythonProject.
+  const getProgram = useCallback(
+    () => (doc ? bundlePythonProject(readAllFiles(doc), PROGRAM_FILE) : ''),
     [doc],
   );
+
+  const programFileCount = paths.filter((p) => p.endsWith('.py')).length;
 
   const copyLink = async () => {
     try {
@@ -91,9 +96,14 @@ export function Workspace({ roomId }: { roomId: string }) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-48 shrink-0 border-r border-edge bg-panel">
+        <aside className="flex w-48 shrink-0 flex-col border-r border-edge bg-panel">
           {doc && (
-            <FileSidebar doc={doc} paths={paths} active={activePath} onSelect={setActive} />
+            <>
+              <div className="min-h-0 flex-1">
+                <FileSidebar doc={doc} paths={paths} active={activePath} onSelect={setActive} />
+              </div>
+              <GitPanel doc={doc} />
+            </>
           )}
         </aside>
 
@@ -122,8 +132,8 @@ export function Workspace({ roomId }: { roomId: string }) {
           <BrainPanel
             session={session}
             snapshot={snapshot}
-            getSource={getSource}
-            sourcePath={PROGRAM_FILE}
+            getProgram={getProgram}
+            programFileCount={programFileCount}
           />
         </aside>
       </div>
