@@ -9,6 +9,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,7 +45,12 @@ if (process.env.VEXCOLLAB_PASSWORD) env.VEXCOLLAB_PASSWORD = process.env.VEXCOLL
 // A git install has no build output; produce one before the first start.
 if (!existsSync(join(root, '.next', 'BUILD_ID'))) {
   console.log('\n  First run - building VEXCollab. This takes a minute.\n');
-  const build = spawnSync('npx', ['next', 'build'], {
+  // Must be the Next that was installed alongside us. `npx next build` would
+  // resolve a *different* next from the registry when we are ourselves running
+  // under npx, which fails with a confusing "Next.js version: 0.0.0" panic.
+  const require = createRequire(import.meta.url);
+  const nextBin = join(dirname(require.resolve('next/package.json')), 'dist', 'bin', 'next');
+  const build = spawnSync(process.execPath, [nextBin, 'build'], {
     cwd: root,
     stdio: 'inherit',
     env: { ...process.env, NODE_ENV: 'production' },
