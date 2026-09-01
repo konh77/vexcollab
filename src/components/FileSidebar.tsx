@@ -38,7 +38,7 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
           type="button"
           onClick={() => setAdding(true)}
           aria-label="New file"
-          className="rounded border border-edge px-1.5 text-xs leading-5 transition hover:border-ink-dim"
+          className="rounded-md px-1.5 text-xs leading-5 text-ink-dim transition hover:bg-edge hover:text-ink"
         >
           +
         </button>
@@ -46,12 +46,14 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
 
       <ul className="vc-scroll flex-1 overflow-y-auto py-1">
         {paths.map((path) => (
-          <li key={path} className="group flex items-center">
+          <li key={path} className="group flex items-center px-2">
             <button
               type="button"
               onClick={() => onSelect(path)}
-              className={`flex-1 truncate px-3 py-1 text-left text-sm transition ${
-                path === active ? 'bg-panel-raised text-ink' : 'text-ink-dim hover:text-ink'
+              className={`flex-1 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition ${
+                path === active
+                  ? 'bg-panel-raised font-medium text-ink shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
+                  : 'text-ink-dim hover:text-ink'
               }`}
             >
               {path}
@@ -64,7 +66,7 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
                   deleteFile(doc, path);
                   if (path === active) onSelect('main.py');
                 }}
-                className="px-2 text-xs text-ink-dim opacity-0 transition group-hover:opacity-100 hover:text-vex-soft"
+                className="px-1.5 text-xs text-ink-dim opacity-0 transition group-hover:opacity-100 hover:text-vex"
               >
                 ✕
               </button>
@@ -88,7 +90,7 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
               }}
               placeholder="auton.py"
               aria-label="New file name"
-              className="w-full rounded border border-edge bg-panel-raised px-2 py-1 text-sm outline-none focus:border-vex"
+              className="w-full rounded-md border border-edge bg-panel-raised px-2 py-1 text-[13px] outline-none focus:border-vex"
             />
           </li>
         )}

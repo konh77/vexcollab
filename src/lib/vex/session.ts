@@ -252,6 +252,53 @@ export class V5Session {
     }
   }
 
+  // --- firmware -----------------------------------------------------------
+
+  /**
+   * The newest vexOS version VEX publishes, or null if we cannot reach them.
+   * Goes through our own origin because VEX's CDN sends no CORS headers.
+   */
+  async fetchLatestFirmware(): Promise<string | null> {
+    try {
+      const response = await fetch('/api/vexos/catalog.txt', { cache: 'no-store' });
+      if (!response.ok) return null;
+      const version = (await response.text()).trim();
+      return /^[\w.-]+$/.test(version) ? version : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Flashes vexOS. This erases and rewrites the brain's boot image, so it is
+   * the one operation here that can leave a brain unusable if it is
+   * interrupted. Callers must confirm with the user first.
+   */
+  async updateFirmware(version?: string): Promise<boolean> {
+    const device = this.device;
+    if (!device?.isConnected) return false;
+
+    this.patch({ transfer: { label: 'Preparing', current: 0, total: 1 }, lastError: null });
+    try {
+      const ok = await device.brain.uploadFirmware(
+        '/api/vexos/',
+        version,
+        (label, current, total) => this.patch({ transfer: { label, current, total } }),
+      );
+      if (ok === undefined) {
+        this.patch({ lastError: 'Could not fetch vexOS from VEX. Check your connection.' });
+        return false;
+      }
+      if (ok) await this.refresh();
+      return Boolean(ok);
+    } catch (error) {
+      this.fail(error, 'Firmware update failed');
+      return false;
+    } finally {
+      this.patch({ transfer: null });
+    }
+  }
+
   // --- screen capture -----------------------------------------------------
 
   /** Grabs the brain's framebuffer and returns it as a PNG data URL. */

@@ -37,6 +37,7 @@ Then open the room link on a second machine and start typing.
 - Controller battery and radio status (VEXnet/Bluetooth, channel, latency)
 - Program slots: list what's on the brain, run a slot, stop the running program
 - Upload `main.py` straight into a slot with a name, description, and progress
+- Update vexOS, fetched live from VEX's own release catalogue
 - Capture the brain's LCD as a PNG
 - A user-port terminal: your program's output, and stdin back to it
 
@@ -105,6 +106,13 @@ Two things to watch on that first run:
    with swapped colours, that constant is one line in `src/lib/vex/screen.ts`.
 
 Issues and PRs with hardware findings are very welcome — that is exactly the gap.
+
+**vexOS updates** go through `/api/vexos/*`, which proxies VEX's public release
+catalogue server-side. VEX's CDN sends no CORS headers, so a browser cannot read it
+directly. The route is a pass-through at your request — nothing is cached, stored, or
+re-hosted, only `catalog.txt` and `*.vexos` are reachable, and no VEX firmware is
+bundled in this repository. Flashing is behind a two-step confirmation because an
+interrupted flash can leave a brain unbootable.
 
 **Known limitation:** Monaco is loaded from a CDN by `@monaco-editor/react`, so the
 first load of a room needs internet even though everything else is local. Bundling

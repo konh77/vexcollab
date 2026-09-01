@@ -77,15 +77,27 @@ export function EditorPane({ provider, path }: Props) {
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    // Xcode's light palette: the most Apple-native syntax colouring there is.
     monaco.editor.defineTheme('vexcollab', {
-      base: 'vs-dark',
+      base: 'vs',
       inherit: true,
-      rules: [],
+      rules: [
+        { token: 'comment', foreground: '707F8C' },
+        { token: 'keyword', foreground: 'AD3DA4' },
+        { token: 'string', foreground: 'D12F1B' },
+        { token: 'number', foreground: '272AD8' },
+        { token: 'type', foreground: '3900A0' },
+        { token: 'type.identifier', foreground: '3900A0' },
+        { token: 'identifier', foreground: '1D1D1F' },
+      ],
       colors: {
-        'editor.background': '#11151f',
-        'editorGutter.background': '#11151f',
-        'editorLineNumber.foreground': '#4c556b',
-        'editor.lineHighlightBackground': '#171c28',
+        'editor.background': '#ffffff',
+        'editorGutter.background': '#ffffff',
+        'editorLineNumber.foreground': '#b8b8bf',
+        'editorLineNumber.activeForeground': '#6e6e73',
+        'editor.lineHighlightBackground': '#f5f5f7',
+        'editor.selectionBackground': '#b3d7ff',
+        'editorIndentGuide.background1': '#eeeef0',
       },
     });
     monaco.editor.setTheme('vexcollab');
@@ -105,13 +117,13 @@ export function EditorPane({ provider, path }: Props) {
   return (
     <Editor
       height="100%"
-      theme="vs-dark"
+      theme="light"
       path={path}
       language={languageForPath(path)}
       onMount={handleMount}
       options={{
         fontSize: 13,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         smoothScrolling: true,

@@ -25,21 +25,21 @@ export function TerminalPane({ terminal, output, isOpen, onClear }: Props) {
   }, [output]);
 
   return (
-    <div className="flex h-full flex-col bg-panel">
+    <div className="flex h-full flex-col bg-shell">
       <div className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-dim">Terminal</span>
         <span className={`size-1.5 rounded-full ${isOpen ? 'bg-ok' : 'bg-ink-dim'}`} aria-hidden />
         <button
           type="button"
           onClick={() => (isOpen ? terminal.close() : terminal.open())}
-          className="ml-auto rounded border border-edge px-2 py-0.5 text-xs transition hover:border-ink-dim"
+          className="ml-auto rounded-md border border-edge bg-panel-raised px-2.5 py-1 text-[11.5px] transition hover:bg-panel"
         >
           {isOpen ? 'Close port' : 'Open user port'}
         </button>
         <button
           type="button"
           onClick={onClear}
-          className="rounded border border-edge px-2 py-0.5 text-xs transition hover:border-ink-dim"
+          className="rounded-md border border-edge bg-panel-raised px-2.5 py-1 text-[11.5px] transition hover:bg-panel"
         >
           Clear
         </button>
@@ -74,12 +74,12 @@ export function TerminalPane({ terminal, output, isOpen, onClear }: Props) {
           disabled={!isOpen}
           placeholder={isOpen ? 'Send to the program…' : 'Port closed'}
           aria-label="Terminal input"
-          className="min-w-0 flex-1 rounded border border-edge bg-panel-raised px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-dim focus:border-vex disabled:opacity-50"
+          className="min-w-0 flex-1 rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-dim focus:border-vex disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={!isOpen}
-          className="rounded border border-edge px-3 py-1 text-xs transition hover:border-ink-dim disabled:opacity-50"
+          className="rounded-md bg-panel px-3 py-1.5 text-xs transition hover:bg-edge disabled:opacity-50"
         >
           Send
         </button>

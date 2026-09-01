@@ -8,9 +8,10 @@ import type { LocalUser } from './provider';
 
 const STORAGE_KEY = 'vexcollab.identity';
 
+// Saturated enough to carry white cursor labels on a white editor.
 const COLORS = [
-  '#f87171', '#fb923c', '#facc15', '#4ade80',
-  '#2dd4bf', '#38bdf8', '#818cf8', '#c084fc', '#f472b6',
+  '#ff3b30', '#ff9500', '#34c759', '#007aff',
+  '#5856d6', '#af52de', '#ff2d55', '#0071e3',
 ];
 
 const ADJECTIVES = ['Swift', 'Torque', 'Clutch', 'Pivot', 'Gearbox', 'Bandit', 'Turbo', 'Lucky'];

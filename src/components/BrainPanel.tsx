@@ -4,7 +4,7 @@
  */
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
 import { pythonPayload } from '@/lib/vex/program';
 import type { V5Session } from '@/lib/vex/session';
@@ -45,8 +45,25 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
   const [coldFile, setColdFile] = useState<File | null>(null);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
+  const [firmwareArmed, setFirmwareArmed] = useState(false);
 
   const connected = snapshot.connectionState === 'connected';
+
+  useEffect(() => {
+    if (!connected) {
+      setLatestFirmware(null);
+      setFirmwareArmed(false);
+      return;
+    }
+    let cancelled = false;
+    void session.fetchLatestFirmware().then((version) => {
+      if (!cancelled) setLatestFirmware(version);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, session]);
 
   if (snapshot.connectionState === 'unsupported') {
     return (
@@ -73,6 +90,16 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
         payload: pythonPayload(getSource()),
         coldPayload,
       });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateFirmware = async () => {
+    setBusy(true);
+    setFirmwareArmed(false);
+    try {
+      await session.updateFirmware(latestFirmware ?? undefined);
     } finally {
       setBusy(false);
     }
@@ -106,14 +133,16 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
         <button
           type="button"
           onClick={() => (connected ? session.disconnect() : session.connect())}
-          className="ml-auto rounded-md border border-edge bg-panel-raised px-3 py-1 text-xs font-medium transition hover:border-ink-dim"
+          className={`ml-auto rounded-md px-3 py-1 text-xs font-medium transition ${
+            connected ? 'bg-panel hover:bg-edge' : 'bg-vex text-white hover:bg-vex-soft'
+          }`}
         >
           {connected ? 'Disconnect' : 'Connect USB'}
         </button>
       </div>
 
       {snapshot.lastError && (
-        <div className="flex items-start gap-2 border-b border-edge bg-vex/10 px-4 py-2 text-xs text-vex-soft">
+        <div className="flex items-start gap-2 border-b border-edge bg-vex/8 px-4 py-2 text-xs text-vex-soft">
           <span className="flex-1">{snapshot.lastError}</span>
           <button type="button" onClick={() => session.clearError()} aria-label="Dismiss error">
             ✕
@@ -129,9 +158,9 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
               {Math.min(100, Math.round((snapshot.transfer.current / Math.max(1, snapshot.transfer.total)) * 100))}%
             </span>
           </div>
-          <div className="h-1 overflow-hidden rounded bg-edge">
+          <div className="h-1 overflow-hidden rounded-full bg-panel">
             <div
-              className="h-full bg-vex transition-[width]"
+              className="h-full rounded-full bg-vex transition-[width]"
               style={{
                 width: `${Math.min(100, (snapshot.transfer.current / Math.max(1, snapshot.transfer.total)) * 100)}%`,
               }}
@@ -217,7 +246,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 <select
                   value={slot}
                   onChange={(event) => setSlot(Number(event.target.value) as SlotNumber)}
-                  className="rounded border border-edge bg-panel-raised px-2 py-1"
+                  className="rounded-md bg-panel px-2 py-1"
                 >
                   {SLOTS.map((value) => (
                     <option key={value} value={value}>
@@ -232,14 +261,14 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 onChange={(event) => setProgramName(event.target.value)}
                 aria-label="Program name"
                 placeholder="Program name"
-                className="w-full rounded border border-edge bg-panel-raised px-2 py-1 outline-none focus:border-vex"
+                className="w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 outline-none focus:border-vex"
               />
               <input
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 aria-label="Program description"
                 placeholder="Description"
-                className="w-full rounded border border-edge bg-panel-raised px-2 py-1 outline-none focus:border-vex"
+                className="w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 outline-none focus:border-vex"
               />
 
               <p className="text-xs text-ink-dim">
@@ -264,7 +293,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 type="button"
                 onClick={upload}
                 disabled={busy || Boolean(snapshot.transfer)}
-                className="w-full rounded-md bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
+                className="w-full rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
               >
                 Upload to slot {slot}
               </button>
@@ -276,7 +305,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
               <button
                 type="button"
                 onClick={() => session.refreshPrograms()}
-                className="rounded border border-edge px-2 py-1 text-xs transition hover:border-ink-dim"
+                className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
               >
                 Refresh
               </button>
@@ -284,7 +313,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 type="button"
                 onClick={() => session.stopProgram()}
                 disabled={!snapshot.isRunningProgram}
-                className="rounded border border-edge px-2 py-1 text-xs transition hover:border-ink-dim disabled:opacity-40"
+                className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge disabled:opacity-40"
               >
                 Stop running program
               </button>
@@ -296,7 +325,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 {snapshot.programs.map((program) => (
                   <li
                     key={program.binfile}
-                    className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm hover:bg-panel-raised"
+                    className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition hover:bg-panel"
                   >
                     <span className="w-6 shrink-0 text-ink-dim">{program.slot}</span>
                     <span className="flex-1 truncate">{program.name}</span>
@@ -306,7 +335,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                     <button
                       type="button"
                       onClick={() => session.runProgram(program.slot as SlotNumber)}
-                      className="rounded border border-edge px-2 py-0.5 text-xs transition hover:border-ink-dim"
+                      className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
                     >
                       Run
                     </button>
@@ -316,12 +345,61 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
             )}
           </Section>
 
+          <Section title="Firmware">
+            <Row label="Installed" value={snapshot.systemVersion} />
+            <Row label="Latest from VEX" value={latestFirmware ?? 'checking…'} />
+
+            {latestFirmware && snapshot.systemVersion === latestFirmware ? (
+              <p className="mt-2 text-xs text-ink-dim">Already on the current vexOS.</p>
+            ) : (
+              <>
+                <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                  Flashing rewrites the brain's boot image.{' '}
+                  <span className="font-medium text-ink">
+                    Do not unplug or close this tab while it runs
+                  </span>{' '}
+                  — an interrupted flash can leave the brain unbootable. Use a charged
+                  battery and a data cable, and quit any other VEX software first.
+                </p>
+
+                {firmwareArmed ? (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={updateFirmware}
+                      disabled={busy || Boolean(snapshot.transfer)}
+                      className="flex-1 rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
+                    >
+                      Yes, flash {latestFirmware}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFirmwareArmed(false)}
+                      className="rounded-lg bg-panel px-3 py-2 text-sm transition hover:bg-edge"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setFirmwareArmed(true)}
+                    disabled={busy || !latestFirmware || Boolean(snapshot.transfer)}
+                    className="mt-2 w-full rounded-lg border border-edge bg-panel-raised px-3 py-2 text-sm font-medium transition hover:bg-panel disabled:opacity-50"
+                  >
+                    Update vexOS{latestFirmware ? ` to ${latestFirmware}` : ''}
+                  </button>
+                )}
+              </>
+            )}
+          </Section>
+
           <Section title="Brain screen">
             <button
               type="button"
               onClick={capture}
               disabled={busy || Boolean(snapshot.transfer)}
-              className="rounded border border-edge px-3 py-1 text-xs transition hover:border-ink-dim disabled:opacity-50"
+              className="rounded-md bg-panel px-3 py-1.5 text-xs transition hover:bg-edge disabled:opacity-50"
             >
               Capture screen
             </button>
@@ -331,7 +409,7 @@ export function BrainPanel({ session, snapshot, getSource, sourcePath }: Props) 
                 <img
                   src={screenshot}
                   alt="VEX V5 brain screen"
-                  className="w-full rounded border border-edge"
+                  className="w-full rounded-lg border border-edge"
                 />
                 <a
                   href={screenshot}
@@ -390,7 +468,7 @@ function EditableValue({
         }
         if (event.key === 'Escape') setDraft(null);
       }}
-      className="w-28 rounded border border-edge bg-panel-raised px-1 text-right outline-none focus:border-vex"
+      className="w-28 rounded-md border border-edge bg-panel-raised px-1.5 text-right outline-none focus:border-vex"
     />
   );
 }

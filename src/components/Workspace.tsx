@@ -50,7 +50,7 @@ export function Workspace({ roomId }: { roomId: string }) {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2">
+      <header className="vc-vibrancy z-10 flex items-center gap-3 border-b border-edge px-4 py-2">
         <a href="/" className="text-sm font-semibold">
           VEX<span className="text-vex">Collab</span>
         </a>
@@ -59,7 +59,7 @@ export function Workspace({ roomId }: { roomId: string }) {
           type="button"
           onClick={copyLink}
           title="Copy the room link"
-          className="rounded border border-edge bg-panel-raised px-2 py-1 font-mono text-xs text-ink-dim transition hover:text-ink"
+          className="rounded-md bg-panel px-2.5 py-1 font-mono text-[11px] text-ink-dim transition hover:text-ink"
         >
           {copied ? 'link copied' : roomId}
         </button>
@@ -71,7 +71,7 @@ export function Workspace({ roomId }: { roomId: string }) {
                 key={peer.id}
                 title={peer.name}
                 style={{ backgroundColor: peer.color }}
-                className="grid size-6 place-items-center rounded-full border-2 border-panel text-[10px] font-bold text-shell"
+                className="grid size-6 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
               >
                 {peer.name.charAt(0).toUpperCase()}
               </span>
@@ -83,7 +83,7 @@ export function Workspace({ roomId }: { roomId: string }) {
           <button
             type="button"
             onClick={() => setShowTerminal((value) => !value)}
-            className="rounded border border-edge px-2 py-1 text-xs transition hover:border-ink-dim"
+            className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
           >
             {showTerminal ? 'Hide terminal' : 'Show terminal'}
           </button>
@@ -118,7 +118,7 @@ export function Workspace({ roomId }: { roomId: string }) {
           )}
         </main>
 
-        <aside className="w-80 shrink-0 border-l border-edge bg-panel">
+        <aside className="w-80 shrink-0 border-l border-edge bg-shell">
           <BrainPanel
             session={session}
             snapshot={snapshot}
