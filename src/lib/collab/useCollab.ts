@@ -16,6 +16,7 @@ export interface CollabState {
   connected: boolean;
   peers: Peer[];
   paths: string[];
+  error: string | null;
 }
 
 export function useCollab(roomId: string): CollabState {
@@ -23,6 +24,7 @@ export function useCollab(roomId: string): CollabState {
   const [connected, setConnected] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [paths, setPaths] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const instance = new CollabProvider(roomId, loadIdentity());
@@ -30,6 +32,7 @@ export function useCollab(roomId: string): CollabState {
 
     const offConnection = instance.onConnectionChange(setConnected);
     const offPeers = instance.onPeers(setPeers);
+    const offError = instance.onError(setError);
 
     const files = getFiles(instance.doc);
     const syncPaths = () => setPaths(listPaths(instance.doc));
@@ -48,11 +51,12 @@ export function useCollab(roomId: string): CollabState {
       offConnection();
       offPeers();
       offSynced();
+      offError();
       files.unobserve(syncPaths);
       instance.destroy();
       setProvider(null);
     };
   }, [roomId]);
 
-  return { provider, doc: provider?.doc ?? null, connected, peers, paths };
+  return { provider, doc: provider?.doc ?? null, connected, peers, paths, error };
 }

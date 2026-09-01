@@ -25,7 +25,7 @@ const EditorPane = dynamic(() => import('./EditorPane').then((m) => m.EditorPane
 const PROGRAM_FILE = 'main.py';
 
 export function Workspace({ roomId }: { roomId: string }) {
-  const { provider, doc, connected, peers, paths } = useCollab(roomId);
+  const { provider, doc, connected, peers, paths, error } = useCollab(roomId);
   const { session, snapshot } = useV5Session();
   const { terminal, output, isOpen, clear } = useV5Terminal();
 
@@ -94,6 +94,16 @@ export function Workspace({ roomId }: { roomId: string }) {
           </button>
         </div>
       </header>
+
+      {(error || !connected) && (
+        <div className="flex items-center gap-2 border-b border-edge bg-warn/12 px-4 py-1.5 text-xs text-ink">
+          <span className="size-1.5 shrink-0 rounded-full bg-warn" />
+          <span>
+            {error ??
+              'Not connected — your changes are only on this screen until this reconnects.'}
+          </span>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-48 shrink-0 flex-col border-r border-edge bg-panel">

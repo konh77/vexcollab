@@ -33,6 +33,7 @@ export class CollabProvider {
   private connectedListeners = new Set<(connected: boolean) => void>();
   private peersListeners = new Set<(peers: Peer[]) => void>();
   private syncedListeners = new Set<() => void>();
+  private errorListeners = new Set<(message: string | null) => void>();
   private hasSynced = false;
   private destroyed = false;
 
@@ -41,7 +42,17 @@ export class CollabProvider {
     this.awareness = new Awareness(doc);
     this.awareness.setLocalStateField('user', user);
 
-    this.socket = io({ path: '/socket.io', transports: ['websocket', 'polling'] });
+    // Deliberately NOT forcing `transports: ['websocket']`. Socket.IO defaults
+    // to polling first and upgrades, which is what survives networks where a
+    // raw WebSocket is blocked or mangled — the difference between "works on
+    // my machine" and "works from your teammate's laptop".
+    this.socket = io({
+      path: '/socket.io',
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 4000,
+      timeout: 10_000,
+    });
 
     // Local edits out. `origin === this` marks updates we applied from the
     // network, so echoing them back would loop forever.
@@ -55,7 +66,16 @@ export class CollabProvider {
       this.socket.emit('awareness', encodeAwarenessUpdate(this.awareness, changed));
     });
 
+    // A silent failure is the worst outcome: the page looks fine and edits
+    // simply never leave. Surface the reason instead.
+    this.socket.on('connect_error', (error: Error) => {
+      this.errorListeners.forEach((l) =>
+        l(`Cannot reach the server (${error.message}). Edits are not being shared.`),
+      );
+    });
+
     this.socket.on('connect', () => {
+      this.errorListeners.forEach((l) => l(null));
       this.socket.emit('join', { roomId, user }, (res: { update: ArrayBuffer }) => {
         if (this.destroyed) return;
         Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
@@ -104,6 +124,12 @@ export class CollabProvider {
     if (this.hasSynced) listener();
     this.syncedListeners.add(listener);
     return () => this.syncedListeners.delete(listener);
+  }
+
+  /** Reports why the connection is failing, or null once it recovers. */
+  onError(listener: (message: string | null) => void) {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
   }
 
   onPeers(listener: (peers: Peer[]) => void) {

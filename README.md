@@ -108,6 +108,20 @@ battery, good cable, don't unplug. It's behind a two-step confirm for that reaso
 
 ---
 
+## If a teammate's edits aren't showing up
+
+The room shows a yellow bar and `offline` in the header whenever it isn't connected —
+if you don't see that bar, you are connected and it's one of these instead:
+
+- **Different rooms.** Both screens must show the *same room code* next to the logo. If
+  you each clicked *Start a room*, you're in two separate rooms that look identical.
+- **Only one computer runs the server.** Everyone else opens that machine's
+  `http://<its-ip>:3000` link. If the second person also ran `npx …`, they're hosting
+  their own server and sharing with nobody.
+- **Different files.** Editing is per file — check you're both on `main.py`.
+- **macOS blocked the connection.** If the page won't even load on the other machine,
+  allow incoming connections for Node in System Settings → Network → Firewall.
+
 ## Configuration
 
 | Variable | Does what | Default |
