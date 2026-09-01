@@ -33,6 +33,8 @@ if (args.includes('--help') || args.includes('-h')) {
     npx github:ponpon77/vexcollab                    start on port 3000
     npx github:ponpon77/vexcollab --port 4000        use another port
     npx github:ponpon77/vexcollab --password pit22   require a password
+    npx github:ponpon77/vexcollab --https            serve TLS, so teammates
+                                                     can use their own brain
 
   Teammates on the same Wi-Fi open the http://<your-ip>:<port> line printed at
   startup. The brain can only be used from the computer with the cable.
@@ -45,6 +47,7 @@ const port = flag('--port');
 const password = flag('--password');
 if (port) env.PORT = port;
 if (password) env.VEXCOLLAB_PASSWORD = password;
+if (args.includes('--https')) env.VEXCOLLAB_HTTPS = '1';
 
 function run(command, commandArgs, cwd) {
   const result = spawnSync(command, commandArgs, { cwd, stdio: 'inherit', env: { ...env } });

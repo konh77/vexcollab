@@ -10,8 +10,12 @@
  * Set VEXCOLLAB_PASSWORD to require a password before anyone gets in.
  */
 import { createServer } from 'node:http';
+import { createServer as createSecureServer } from 'node:https';
+import { execFileSync } from 'node:child_process';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { networkInterfaces } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, networkInterfaces } from 'node:os';
+import { join } from 'node:path';
 import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
@@ -20,6 +24,7 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST ?? '0.0.0.0';
 const port = Number(process.env.PORT ?? 3000);
 const password = process.env.VEXCOLLAB_PASSWORD || null;
+const useHttps = process.env.VEXCOLLAB_HTTPS === '1';
 
 const COOKIE = 'vexcollab_auth';
 
@@ -83,6 +88,50 @@ function lanAddresses() {
   return out;
 }
 
+/**
+ * Browsers only expose WebSerial in a secure context. http://localhost counts,
+ * but http://192.168.x.x does not — so a teammate on the Wi-Fi cannot reach a
+ * brain plugged into their own machine unless we serve TLS. A self-signed cert
+ * is enough: once it is accepted, the origin is treated as secure.
+ *
+ * The IP addresses must be in subjectAltName or Chrome rejects the cert
+ * outright, so the cert is regenerated whenever this machine's addresses change.
+ */
+function ensureCertificate(addresses) {
+  const dir = join(homedir(), '.vexcollab', 'certs');
+  const keyFile = join(dir, 'key.pem');
+  const certFile = join(dir, 'cert.pem');
+  const stampFile = join(dir, 'hosts.txt');
+  const wanted = ['127.0.0.1', ...addresses].join(',');
+
+  const current =
+    existsSync(stampFile) && readFileSync(stampFile, 'utf8').trim() === wanted;
+  if (current && existsSync(keyFile) && existsSync(certFile)) {
+    return { key: readFileSync(keyFile), cert: readFileSync(certFile) };
+  }
+
+  mkdirSync(dir, { recursive: true });
+  const san = ['DNS:localhost', ...['127.0.0.1', ...addresses].map((a) => `IP:${a}`)].join(',');
+  try {
+    execFileSync(
+      'openssl',
+      [
+        'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+        '-keyout', keyFile, '-out', certFile,
+        '-days', '825', '-subj', '/CN=VEXCollab',
+        '-addext', `subjectAltName=${san}`,
+      ],
+      { stdio: 'ignore' },
+    );
+  } catch (error) {
+    console.error('\n  Could not generate a certificate with openssl.');
+    console.error('  Falling back to http (WebSerial will only work on localhost).\n');
+    return null;
+  }
+  writeFileSync(stampFile, wanted);
+  return { key: readFileSync(keyFile), cert: readFileSync(certFile) };
+}
+
 const app = next({ dev, hostname: hostname === '0.0.0.0' ? 'localhost' : hostname, port });
 const handle = app.getRequestHandler();
 
@@ -104,7 +153,7 @@ function getRoom(roomId) {
 
 await app.prepare();
 
-const httpServer = createServer(async (req, res) => {
+const requestHandler = async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
 
   // Login endpoint lives here rather than in a route handler so that the
@@ -136,7 +185,13 @@ const httpServer = createServer(async (req, res) => {
   }
 
   return handle(req, res);
-});
+};
+
+const credentials = useHttps ? ensureCertificate(lanAddresses()) : null;
+const scheme = credentials ? 'https' : 'http';
+const httpServer = credentials
+  ? createSecureServer(credentials, requestHandler)
+  : createServer(requestHandler);
 
 const io = new SocketServer(httpServer, {
   maxHttpBufferSize: 1e7,
@@ -204,20 +259,26 @@ io.on('connection', (socket) => {
 httpServer.listen(port, hostname, () => {
   const lan = lanAddresses();
   console.log('\n  VEXCollab is up\n');
-  console.log(`  On this computer   http://localhost:${port}`);
+  console.log(`  On this computer   ${scheme}://localhost:${port}`);
   for (const address of lan) {
-    console.log(`  On your Wi-Fi      http://${address}:${port}`);
+    console.log(`  On your Wi-Fi      ${scheme}://${address}:${port}`);
   }
   console.log(
     password
       ? '\n  Password required. Share it with your team along with the link.\n'
       : '\n  No password set. Anyone on your network can open this.\n  Set VEXCOLLAB_PASSWORD to require one.\n',
   );
-  if (lan.length) {
+  if (lan.length && !credentials) {
     console.log(
-      '  Note: the brain can only be reached from http://localhost. Browsers block\n' +
-        '  USB access on plain-http LAN addresses, so teammates can edit but the\n' +
-        '  computer with the cable does the uploading.\n',
+      '  Note: the brain can only be reached from localhost. Browsers block USB\n' +
+        '  access on plain-http LAN addresses, so teammates can edit but only this\n' +
+        '  computer can upload. Start with --https to let them use a brain too.\n',
+    );
+  }
+  if (credentials) {
+    console.log(
+      '  Using a self-signed certificate, so each browser shows a warning once:\n' +
+        '  click Advanced, then Proceed. After that the brain works over Wi-Fi too.\n',
     );
   }
 });

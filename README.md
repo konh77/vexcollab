@@ -51,15 +51,25 @@ npx github:ponpon77/vexcollab --password pit22
 
 Gates the page *and* the connection behind it. Do this if you're on school or venue Wi-Fi.
 
-Other flags: `--port 4000`, `--help`.
+Other flags: `--port 4000`, `--https`, `--help`.
 
 ---
 
 ## Three things to know
 
-**Only the computer with the cable can use the brain.** Teammates on the Wi-Fi can edit
-everything, but browsers block USB on non-`localhost` addresses. So one person uploads.
-That's a browser rule, not a missing feature.
+**USB needs a secure connection.** Browsers only expose WebSerial on `https://` or
+`localhost`, so on a plain `http://192.168.x.x` link the brain panel is unavailable —
+your teammate's Chrome supports it, the address disqualifies it. Editing is unaffected.
+
+If someone else needs to use a brain from their own machine, start with TLS:
+
+```bash
+npx github:ponpon77/vexcollab --https
+```
+
+It generates a self-signed certificate covering your Wi-Fi address. Each browser shows a
+warning once — click **Advanced → Proceed** — and the brain works from there on. Without
+`--https`, the machine with the cable does the uploading.
 
 **Folders work, but there's no `import`.** The V5 stores a program as one file, so
 `import drive` can't work on the brain. Instead, every `.py` file is glued together at
@@ -129,6 +139,7 @@ if you don't see that bar, you are connected and it's one of these instead:
 | `PORT` | Port to serve on | `3000` |
 | `VEXCOLLAB_PASSWORD` | Require a password | none |
 | `VEXCOLLAB_PROJECT_DIR` | Where Git commits go | `./vex-project` |
+| `VEXCOLLAB_HTTPS` | `1` serves TLS, so WebSerial works off-localhost | off |
 
 ## From source
 

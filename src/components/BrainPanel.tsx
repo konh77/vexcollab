@@ -45,10 +45,17 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
   const [coldFile, setColdFile] = useState<File | null>(null);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [insecureContext, setInsecureContext] = useState(false);
   const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
   const [firmwareArmed, setFirmwareArmed] = useState(false);
 
   const connected = snapshot.connectionState === 'connected';
+
+  // Read after mount: window.isSecureContext has no server-side equivalent and
+  // reading it during render would desync hydration.
+  useEffect(() => {
+    setInsecureContext(!window.isSecureContext);
+  }, []);
 
   useEffect(() => {
     if (!connected) {
@@ -66,7 +73,24 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
   }, [connected, session]);
 
   if (snapshot.connectionState === 'unsupported') {
-    return (
+    // The usual cause on a teammate's laptop is not the browser at all — it is
+    // that http://<lan-ip> is not a secure context, so Chrome hides WebSerial.
+    return insecureContext ? (
+      <div className="p-4 text-sm text-ink-dim">
+        <p className="mb-2 font-medium text-ink">USB needs a secure connection.</p>
+        <p className="mb-2">
+          Your browser supports WebSerial, but hides it on{' '}
+          <span className="font-mono text-xs">http://</span> addresses other than
+          localhost. Editing works fine — only the brain is blocked.
+        </p>
+        <p>
+          To use a brain from this machine, restart the server with{' '}
+          <span className="rounded bg-panel px-1 py-0.5 font-mono text-xs">--https</span> and
+          reopen this page over{' '}
+          <span className="font-mono text-xs">https://</span>.
+        </p>
+      </div>
+    ) : (
       <div className="p-4 text-sm text-ink-dim">
         <p className="mb-2 font-medium text-ink">No WebSerial in this browser.</p>
         <p>
