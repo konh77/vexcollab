@@ -37,13 +37,6 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 - Live terminal of everything your program prints, and type back to it
 - Update vexOS
 
-**C++ as well as Python**
-- Python uploads as-is — no compiler, nothing to install
-- C++ is cross-compiled on the machine running the server, then uploaded the same way.
-  Needs an ARM toolchain (`brew install --cask gcc-arm-embedded`) and the V5 SDK, which
-  is found automatically from your VEXcode install. A project is treated as C++ as soon
-  as it contains a `.cpp` file.
-
 **Edit like an IDE**
 - **VEX API completions** that know your variables — type `left_drive.` and get
   `spin_for`, `set_velocity`, `temperature` with real signatures, because it saw
@@ -56,7 +49,8 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 
 **Ship it**
 - Commit and push the room to a real GitHub repo, or pull your teammate's work in
-- Uses *your* git — no tokens to paste
+- Sign in to GitHub, pick from your repositories (or create one), and load it into
+  the room. *Save session to GitHub* commits and pushes everything back
 
 ---
 
@@ -163,17 +157,38 @@ if you don't see that bar, you are connected and it's one of these instead:
 - **macOS blocked the connection.** If the page won't even load on the other machine,
   allow incoming connections for Node in System Settings → Network → Firewall.
 
+## Host it for your team
+
+Run it on a Raspberry Pi at your own domain and everyone just opens a link — no
+install, no `npx`, and **every person can use their own brain**, because real HTTPS
+makes WebSerial available in any visitor's browser.
+
+See [`deploy/pi/README.md`](./deploy/pi/README.md). The short version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ponpon77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- your-domain.org
+```
+
+It sets up Caddy with a Let's Encrypt certificate, runs the app as a sandboxed
+system user bound to localhost, generates a room password, and configures `ufw`,
+key-only SSH, `fail2ban`, and automatic security updates. Forward **only 80 and
+443** on your router.
+
+The Pi stays idle: it serves the page and relays edits. The editor, the USB
+connection, and the Python bundling all happen in each person's browser.
+
 ## Configuration
 
 | Variable | Does what | Default |
 | --- | --- | --- |
 | `PORT` | Port to serve on | `3000` |
 | `VEXCOLLAB_PASSWORD` | Require a password | none |
-| `VEXCOLLAB_PROJECT_DIR` | Where Git commits go | `./vex-project` |
+| `VEXCOLLAB_DATA_DIR` | Where room checkouts live | `./.vexcollab-data` |
+| `VEXCOLLAB_TRUST_PROXY` | `1` when behind Caddy/nginx | off |
+| `VEXCOLLAB_GITHUB_CLIENT_ID` | Enables *Sign in with GitHub* | off (token paste still works) |
 | `VEXCOLLAB_HTTPS` | `1` serves TLS, so WebSerial works off-localhost | off |
 | `VEXCOLLAB_COPILOT` | `1` enables GitHub Copilot suggestions | off |
 | `VEXCOLLAB_TOOLCHAIN` | Folder holding `arm-none-eabi-g++` | auto-detected |
-| `VEXCOLLAB_V5_SDK` | V5 C++ SDK path | found from VEXcode |
 
 ## From source
 

@@ -28,6 +28,62 @@ const useHttps = process.env.VEXCOLLAB_HTTPS === '1';
 
 const COOKIE = 'vexcollab_auth';
 
+/** Behind Caddy/nginx the TLS terminates upstream; trust the proxy's headers. */
+const trustProxy = process.env.VEXCOLLAB_TRUST_PROXY === '1';
+
+/**
+ * Login throttling. This box may be port-forwarded, so an unmetered password
+ * field is an invitation. Ten tries per IP per fifteen minutes, and a wrong
+ * guess costs a slot whether or not the password is even set.
+ */
+const ATTEMPTS = new Map();
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const ATTEMPT_LIMIT = 10;
+
+function clientIp(req) {
+  if (trustProxy) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) return String(forwarded).split(',')[0].trim();
+  }
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  const record = ATTEMPTS.get(ip);
+  if (!record || now > record.resetAt) return false;
+  return record.count >= ATTEMPT_LIMIT;
+}
+
+function noteAttempt(ip) {
+  const now = Date.now();
+  const record = ATTEMPTS.get(ip);
+  if (!record || now > record.resetAt) {
+    ATTEMPTS.set(ip, { count: 1, resetAt: now + ATTEMPT_WINDOW_MS });
+  } else {
+    record.count += 1;
+  }
+  // Keep the map from growing without bound on a public box.
+  if (ATTEMPTS.size > 5000) {
+    for (const [key, value] of ATTEMPTS) if (now > value.resetAt) ATTEMPTS.delete(key);
+  }
+}
+
+function isSecureRequest(req) {
+  if (useHttps) return true;
+  return trustProxy && req.headers['x-forwarded-proto'] === 'https';
+}
+
+function securityHeaders(req, res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  if (isSecureRequest(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+}
+
 /** Stable for the life of the process; changing the password invalidates it. */
 const sessionToken = password
   ? createHmac('sha256', password).update('vexcollab-session-v1').digest('hex')
@@ -154,23 +210,31 @@ function getRoom(roomId) {
 await app.prepare();
 
 const requestHandler = async (req, res) => {
+  securityHeaders(req, res);
   const pathname = new URL(req.url, 'http://localhost').pathname;
 
   // Login endpoint lives here rather than in a route handler so that the
   // password never has to be duplicated into the Next runtime.
   if (pathname === '/api/auth' && req.method === 'POST') {
+    const ip = clientIp(req);
+    if (tooManyAttempts(ip)) {
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '900' });
+      return res.end(JSON.stringify({ ok: false, error: 'Too many attempts. Wait 15 minutes.' }));
+    }
     try {
       const { password: attempt } = JSON.parse((await readBody(req)) || '{}');
       if (password && attempt && safeEqual(attempt, password)) {
+        const secure = isSecureRequest(req) ? '; Secure' : '';
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Set-Cookie': `${COOKIE}=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`,
+          'Set-Cookie': `${COOKIE}=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`,
         });
         return res.end(JSON.stringify({ ok: true }));
       }
     } catch {
       // fall through to the failure response
     }
+    noteAttempt(ip);
     res.writeHead(401, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: false, error: 'Wrong password' }));
   }
@@ -195,6 +259,8 @@ const httpServer = credentials
 
 const io = new SocketServer(httpServer, {
   maxHttpBufferSize: 1e7,
+  // Same-origin only in production. The client connects to its own origin, so
+  // there is no legitimate cross-origin socket.
   cors: { origin: dev ? '*' : false },
 });
 

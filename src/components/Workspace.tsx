@@ -8,18 +8,13 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { readAllFiles } from '@/lib/collab/project';
-import {
-  bundlePythonProject,
-  countProgramFiles,
-  detectLanguage,
-  pythonPayload,
-} from '@/lib/vex/program';
+import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { CommandPalette, type Command } from './CommandPalette';
 import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
-import { GitPanel } from './GitPanel';
+import { GitHubPanel } from './GitHubPanel';
 import { StatusBar } from './StatusBar';
 import { TerminalPane } from './TerminalPane';
 import type { Problem } from './EditorPane';
@@ -47,34 +42,10 @@ export function Workspace({ roomId }: { roomId: string }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [copilot, setCopilot] = useState<'off' | 'signed-out' | 'ready' | 'thinking'>('off');
 
-  const language = detectLanguage(paths.map((path) => ({ path })));
-
-  /**
-   * Produces the bytes to write to a program slot. Python is bundled in the
-   * browser; C++ has to be cross-compiled, which only the machine running the
-   * server can do.
-   */
-  const prepareProgram = useCallback(async () => {
-    if (!doc) throw new Error('Not connected to the room yet');
-    const files = readAllFiles(doc);
-
-    if (detectLanguage(files) === 'python') {
-      return { payload: pythonPayload(bundlePythonProject(files, PROGRAM_FILE)) };
-    }
-
-    const response = await fetch('/api/build', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files }),
-    });
-    const result = await response.json();
-    if (!result.ok) throw new Error(result.error || 'Build failed');
-
-    const binary = atob(result.binBase64);
-    const payload = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) payload[i] = binary.charCodeAt(i);
-    return { payload, log: result.log as string | undefined };
-  }, [doc]);
+  const getProgram = useCallback(
+    () => (doc ? bundlePythonProject(readAllFiles(doc), PROGRAM_FILE) : ''),
+    [doc],
+  );
 
   const programFileCount = countProgramFiles(paths.map((path) => ({ path, contents: '' })));
   const activePath = paths.includes(active) ? active : (paths[0] ?? PROGRAM_FILE);
@@ -284,6 +255,17 @@ export function Workspace({ roomId }: { roomId: string }) {
           >
             {showTerminal ? 'Hide terminal' : 'Show terminal'}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              // A full navigation, so the socket and any open serial port are
+              // closed by teardown rather than left dangling.
+              window.location.href = '/';
+            }}
+            className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+          >
+            Leave room
+          </button>
         </div>
       </header>
 
@@ -294,7 +276,7 @@ export function Workspace({ roomId }: { roomId: string }) {
               <div className="min-h-0 flex-1">
                 <FileSidebar doc={doc} paths={paths} active={activePath} onSelect={openFile} />
               </div>
-              <GitPanel doc={doc} />
+              <GitHubPanel doc={doc} roomId={roomId} />
             </>
           )}
         </aside>
@@ -334,9 +316,8 @@ export function Workspace({ roomId }: { roomId: string }) {
           <BrainPanel
             session={session}
             snapshot={snapshot}
-            prepareProgram={prepareProgram}
+            getProgram={getProgram}
             programFileCount={programFileCount}
-            language={language}
           />
         </aside>
       </div>
