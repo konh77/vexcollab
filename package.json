@@ -36,5 +36,8 @@
   },
   "bin": {
     "vexcollab": "./bin/vexcollab.mjs"
+  },
+  "optionalDependencies": {
+    "@github/copilot-language-server": "^1.539.0"
   }
 }

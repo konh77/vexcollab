@@ -35,6 +35,7 @@ if (args.includes('--help') || args.includes('-h')) {
     npx github:ponpon77/vexcollab --password pit22   require a password
     npx github:ponpon77/vexcollab --https            serve TLS, so teammates
                                                      can use their own brain
+    npx github:ponpon77/vexcollab --copilot          enable GitHub Copilot
 
   Teammates on the same Wi-Fi open the http://<your-ip>:<port> line printed at
   startup. The brain can only be used from the computer with the cable.
@@ -48,6 +49,7 @@ const password = flag('--password');
 if (port) env.PORT = port;
 if (password) env.VEXCOLLAB_PASSWORD = password;
 if (args.includes('--https')) env.VEXCOLLAB_HTTPS = '1';
+if (args.includes('--copilot')) env.VEXCOLLAB_COPILOT = '1';
 
 function run(command, commandArgs, cwd) {
   const result = spawnSync(command, commandArgs, { cwd, stdio: 'inherit', env: { ...env } });

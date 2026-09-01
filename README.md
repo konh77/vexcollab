@@ -44,11 +44,35 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
   is found automatically from your VEXcode install. A project is treated as C++ as soon
   as it contains a `.cpp` file.
 
+**Edit like an IDE**
+- **VEX API completions** that know your variables — type `left_drive.` and get
+  `spin_for`, `set_velocity`, `temperature` with real signatures, because it saw
+  `left_drive = Motor(...)`
+- **Live syntax checking** — red squiggles and a problem count before you upload,
+  not after the program refuses to start on the field
+- **Command palette** (⌘K) for files and actions, editor tabs, status bar,
+  minimap, sticky scroll, bracket colouring, hover docs
+- ⌘J toggles the terminal. ⌘S does nothing on purpose — everything is already saved
+
 **Ship it**
 - Commit and push the room to a real GitHub repo, or pull your teammate's work in
 - Uses *your* git — no tokens to paste
 
 ---
+
+## GitHub Copilot
+
+```bash
+npx github:ponpon77/vexcollab --copilot
+```
+
+Then ⌘K → *Copilot: sign in*, and follow the device-flow code. Suggestions appear
+as ghost text while you type.
+
+Needs your own **Copilot subscription**. It runs GitHub's official
+`@github/copilot-language-server` — the same server Neovim and Emacs use — as a
+subprocess. VEXCollab never sees or stores your token; the language server owns it.
+Off unless you pass the flag, so nobody spawns a process they didn't ask for.
 
 ## Add a password
 
@@ -58,7 +82,7 @@ npx github:ponpon77/vexcollab --password pit22
 
 Gates the page *and* the connection behind it. Do this if you're on school or venue Wi-Fi.
 
-Other flags: `--port 4000`, `--https`, `--help`.
+Other flags: `--port 4000`, `--https`, `--copilot`, `--help`.
 
 ---
 
@@ -147,6 +171,7 @@ if you don't see that bar, you are connected and it's one of these instead:
 | `VEXCOLLAB_PASSWORD` | Require a password | none |
 | `VEXCOLLAB_PROJECT_DIR` | Where Git commits go | `./vex-project` |
 | `VEXCOLLAB_HTTPS` | `1` serves TLS, so WebSerial works off-localhost | off |
+| `VEXCOLLAB_COPILOT` | `1` enables GitHub Copilot suggestions | off |
 | `VEXCOLLAB_TOOLCHAIN` | Folder holding `arm-none-eabi-g++` | auto-detected |
 | `VEXCOLLAB_V5_SDK` | V5 C++ SDK path | found from VEXcode |
 

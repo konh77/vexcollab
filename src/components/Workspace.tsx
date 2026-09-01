@@ -5,15 +5,24 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { readAllFiles } from '@/lib/collab/project';
-import { bundlePythonProject, countProgramFiles, detectLanguage, pythonPayload } from '@/lib/vex/program';
+import {
+  bundlePythonProject,
+  countProgramFiles,
+  detectLanguage,
+  pythonPayload,
+} from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
+import { CommandPalette, type Command } from './CommandPalette';
+import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
 import { GitPanel } from './GitPanel';
+import { StatusBar } from './StatusBar';
 import { TerminalPane } from './TerminalPane';
+import type { Problem } from './EditorPane';
 
 // Monaco reaches for `window` as soon as it is imported, so the editor can only
 // exist on the client.
@@ -25,13 +34,18 @@ const EditorPane = dynamic(() => import('./EditorPane').then((m) => m.EditorPane
 const PROGRAM_FILE = 'main.py';
 
 export function Workspace({ roomId }: { roomId: string }) {
-  const { provider, doc, connected, peers, paths, error } = useCollab(roomId);
+  const { provider, doc, connected, peers, paths } = useCollab(roomId);
   const { session, snapshot } = useV5Session();
   const { terminal, output, isOpen, clear } = useV5Terminal();
 
   const [active, setActive] = useState(PROGRAM_FILE);
+  const [openTabs, setOpenTabs] = useState<string[]>([PROGRAM_FILE]);
   const [showTerminal, setShowTerminal] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [cursor, setCursor] = useState({ line: 1, column: 1 });
+  const [problemsByPath, setProblemsByPath] = useState<Record<string, number>>({});
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [copilot, setCopilot] = useState<'off' | 'signed-out' | 'ready' | 'thinking'>('off');
 
   const language = detectLanguage(paths.map((path) => ({ path })));
 
@@ -63,6 +77,42 @@ export function Workspace({ roomId }: { roomId: string }) {
   }, [doc]);
 
   const programFileCount = countProgramFiles(paths.map((path) => ({ path, contents: '' })));
+  const activePath = paths.includes(active) ? active : (paths[0] ?? PROGRAM_FILE);
+
+  const openFile = useCallback((path: string) => {
+    setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
+    setActive(path);
+  }, []);
+
+  const closeTab = useCallback(
+    (path: string) => {
+      setOpenTabs((tabs) => {
+        const next = tabs.filter((t) => t !== path);
+        if (path === active) setActive(next[next.length - 1] ?? PROGRAM_FILE);
+        return next.length ? next : [PROGRAM_FILE];
+      });
+    },
+    [active],
+  );
+
+  // Copilot is optional and off unless the server was started with it.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/copilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status' }),
+    })
+      .then((r) => r.json())
+      .then((status: { enabled: boolean; signedIn: boolean }) => {
+        if (cancelled) return;
+        setCopilot(!status.enabled ? 'off' : status.signedIn ? 'ready' : 'signed-out');
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const copyLink = async () => {
     try {
@@ -74,7 +124,120 @@ export function Workspace({ roomId }: { roomId: string }) {
     }
   };
 
-  const activePath = paths.includes(active) ? active : (paths[0] ?? PROGRAM_FILE);
+  const commands = useMemo<Command[]>(() => {
+    const fileCommands: Command[] = paths.map((path) => ({
+      id: `file:${path}`,
+      label: path,
+      group: 'File',
+      run: () => openFile(path),
+    }));
+
+    // Deliberately no upload or run here: those move a robot, and a command
+    // palette is one keystroke away from an accident.
+    const actions: Command[] = [
+      {
+        id: 'brain.connect',
+        label: snapshot.connectionState === 'connected' ? 'Disconnect brain' : 'Connect brain over USB',
+        group: 'Brain',
+        run: () =>
+          snapshot.connectionState === 'connected' ? void session.disconnect() : void session.connect(),
+      },
+      {
+        id: 'brain.stop',
+        label: 'Stop the running program',
+        group: 'Brain',
+        disabled: !snapshot.isRunningProgram,
+        run: () => void session.stopProgram(),
+      },
+      {
+        id: 'brain.screen',
+        label: 'Capture the brain screen',
+        group: 'Brain',
+        disabled: snapshot.connectionState !== 'connected',
+        run: () => void session.captureScreen(),
+      },
+      {
+        id: 'view.terminal',
+        label: showTerminal ? 'Hide the terminal' : 'Show the terminal',
+        group: 'View',
+        hint: '⌘J',
+        run: () => setShowTerminal((v) => !v),
+      },
+      {
+        id: 'terminal.port',
+        label: isOpen ? 'Close the user serial port' : 'Open the user serial port',
+        group: 'View',
+        run: () => void (isOpen ? terminal.close() : terminal.open()),
+      },
+      {
+        id: 'room.copy',
+        label: 'Copy the room link',
+        group: 'Room',
+        run: () => void copyLink(),
+      },
+    ];
+
+    if (copilot !== 'off') {
+      actions.push({
+        id: 'copilot.signin',
+        label: copilot === 'ready' ? 'Copilot: signed in' : 'Copilot: sign in',
+        group: 'Copilot',
+        disabled: copilot === 'ready',
+        run: () => {
+          void fetch('/api/copilot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'signin' }),
+          })
+            .then((r) => r.json())
+            .then((status: { userCode?: string; verificationUri?: string }) => {
+              if (status.userCode) {
+                window.prompt(
+                  `Copy this code, then open ${status.verificationUri ?? 'https://github.com/login/device'} to finish signing in:`,
+                  status.userCode,
+                );
+              }
+            })
+            .catch(() => undefined);
+        },
+      });
+    }
+
+    return [...actions, ...fileCommands];
+  }, [paths, openFile, session, snapshot, showTerminal, isOpen, terminal, copilot]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+      if (mod && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        setShowTerminal((v) => !v);
+      }
+      // Everything is live-saved; stop the browser's save dialog.
+      if (mod && event.key.toLowerCase() === 's') event.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const problems = problemsByPath[activePath] ?? 0;
+
+  const brainState =
+    snapshot.connectionState === 'connected'
+      ? snapshot.batteryPercent != null
+        ? `Brain ${snapshot.batteryPercent}%`
+        : 'Brain connected'
+      : snapshot.connectionState === 'unsupported'
+        ? 'USB unavailable'
+        : 'No brain';
 
   return (
     <div className="flex h-screen flex-col">
@@ -92,6 +255,14 @@ export function Workspace({ roomId }: { roomId: string }) {
           {copied ? 'link copied' : roomId}
         </button>
 
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(true)}
+          className="rounded-md bg-panel px-2.5 py-1 text-[11px] text-ink-dim transition hover:text-ink"
+        >
+          Search or run a command  ⌘K
+        </button>
+
         <div className="ml-auto flex items-center gap-2">
           <div className="flex -space-x-1.5">
             {peers.map((peer) => (
@@ -105,9 +276,7 @@ export function Workspace({ roomId }: { roomId: string }) {
               </span>
             ))}
           </div>
-          <span className="text-xs text-ink-dim">
-            {connected ? `${peers.length} here` : 'offline'}
-          </span>
+          <span className="text-xs text-ink-dim">{connected ? `${peers.length} here` : 'offline'}</span>
           <button
             type="button"
             onClick={() => setShowTerminal((value) => !value)}
@@ -118,22 +287,12 @@ export function Workspace({ roomId }: { roomId: string }) {
         </div>
       </header>
 
-      {(error || !connected) && (
-        <div className="flex items-center gap-2 border-b border-edge bg-warn/12 px-4 py-1.5 text-xs text-ink">
-          <span className="size-1.5 shrink-0 rounded-full bg-warn" />
-          <span>
-            {error ??
-              'Not connected — your changes are only on this screen until this reconnects.'}
-          </span>
-        </div>
-      )}
-
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-48 shrink-0 flex-col border-r border-edge bg-panel">
           {doc && (
             <>
               <div className="min-h-0 flex-1">
-                <FileSidebar doc={doc} paths={paths} active={activePath} onSelect={setActive} />
+                <FileSidebar doc={doc} paths={paths} active={activePath} onSelect={openFile} />
               </div>
               <GitPanel doc={doc} />
             </>
@@ -141,9 +300,24 @@ export function Workspace({ roomId }: { roomId: string }) {
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
+          <EditorTabs
+            open={openTabs.filter((t) => paths.includes(t))}
+            active={activePath}
+            problemsByPath={problemsByPath}
+            onSelect={setActive}
+            onClose={closeTab}
+          />
+
           <div className="min-h-0 flex-1">
             {provider ? (
-              <EditorPane provider={provider} path={activePath} />
+              <EditorPane
+                provider={provider}
+                path={activePath}
+                onCursorChange={setCursor}
+                onProblemsChange={(list: Problem[]) =>
+                  setProblemsByPath((prev) => ({ ...prev, [activePath]: list.length }))
+                }
+              />
             ) : (
               <div className="p-4 text-sm text-ink-dim">Joining room…</div>
             )}
@@ -151,12 +325,7 @@ export function Workspace({ roomId }: { roomId: string }) {
 
           {showTerminal && (
             <div className="h-56 shrink-0 border-t border-edge">
-              <TerminalPane
-                terminal={terminal}
-                output={output}
-                isOpen={isOpen}
-                onClear={clear}
-              />
+              <TerminalPane terminal={terminal} output={output} isOpen={isOpen} onClear={clear} />
             </div>
           )}
         </main>
@@ -171,6 +340,19 @@ export function Workspace({ roomId }: { roomId: string }) {
           />
         </aside>
       </div>
+
+      <StatusBar
+        path={activePath}
+        cursor={cursor}
+        problems={problems}
+        peers={peers.length}
+        connected={connected}
+        brainState={brainState}
+        copilot={copilot}
+        onOpenPalette={() => setPaletteOpen(true)}
+      />
+
+      <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

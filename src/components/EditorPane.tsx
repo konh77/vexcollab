@@ -4,18 +4,28 @@
  */
 'use client';
 
-import Editor, { type OnMount } from '@monaco-editor/react';
-import { useEffect, useRef } from 'react';
+import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
+import { useEffect, useRef, useState } from 'react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { MonacoBinding } from 'y-monaco';
 import type * as Y from 'yjs';
 import type { CollabProvider } from '@/lib/collab/provider';
 import { getFiles } from '@/lib/collab/project';
+import { registerVexPython } from '@/lib/editor/vex-language';
 import { languageForPath } from '@/lib/vex/program';
+
+export interface Problem {
+  line: number;
+  column: number;
+  message: string;
+}
 
 interface Props {
   provider: CollabProvider;
   path: string;
+  onCursorChange?: (position: { line: number; column: number }) => void;
+  onProblemsChange?: (problems: Problem[]) => void;
+  onEditorReady?: (editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco) => void;
 }
 
 /**
@@ -53,9 +63,19 @@ function useRemoteCursorStyles(provider: CollabProvider) {
   }, [provider]);
 }
 
-export function EditorPane({ provider, path }: Props) {
+export function EditorPane({
+  provider,
+  path,
+  onCursorChange,
+  onProblemsChange,
+  onEditorReady,
+}: Props) {
   const bindingRef = useRef<MonacoBinding | null>(null);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+  // Monaco loads asynchronously. Refs do not re-trigger effects, so mounting
+  // has to flip real state or the language features below never attach.
+  const [ready, setReady] = useState(false);
 
   useRemoteCursorStyles(provider);
 
@@ -67,16 +87,13 @@ export function EditorPane({ provider, path }: Props) {
     const text = getFiles(provider.doc).get(path) as Y.Text | undefined;
     if (!model || !text) return;
 
-    bindingRef.current = new MonacoBinding(
-      text,
-      model,
-      new Set([editor]),
-      provider.awareness,
-    );
+    bindingRef.current = new MonacoBinding(text, model, new Set([editor]), provider.awareness);
   };
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco;
+
     // Xcode's light palette: the most Apple-native syntax colouring there is.
     monaco.editor.defineTheme('vexcollab', {
       base: 'vs',
@@ -101,8 +118,22 @@ export function EditorPane({ provider, path }: Props) {
       },
     });
     monaco.editor.setTheme('vexcollab');
+
+    editor.onDidChangeCursorPosition((event) =>
+      onCursorChange?.({ line: event.position.lineNumber, column: event.position.column }),
+    );
+
     bind(editor);
+    onEditorReady?.(editor, monaco);
+    setReady(true);
   };
+
+  // Language intelligence is global to Monaco, not per-editor, so it is
+  // registered once and disposed when this pane goes away.
+  useEffect(() => {
+    if (!ready || !monacoRef.current) return;
+    return registerVexPython(monacoRef.current);
+  }, [ready]);
 
   // Switching tabs swaps the model, so the binding has to be rebuilt.
   useEffect(() => {
@@ -112,7 +143,65 @@ export function EditorPane({ provider, path }: Props) {
       bindingRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, provider]);
+  }, [path, provider, ready]);
+
+  // Debounced syntax check, rendered as squiggles.
+  useEffect(() => {
+    if (!ready) return;
+    if (!path.endsWith('.py')) {
+      onProblemsChange?.([]);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+
+    const check = async () => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const model = editor?.getModel();
+      if (!editor || !monaco || !model) return;
+      try {
+        const response = await fetch('/api/lint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: model.getValue() }),
+        });
+        const { problems = [] } = (await response.json()) as { problems: Problem[] };
+        if (cancelled) return;
+        monaco.editor.setModelMarkers(
+          model,
+          'vexcollab',
+          problems.map((p) => ({
+            severity: monaco.MarkerSeverity.Error,
+            message: p.message,
+            startLineNumber: p.line,
+            startColumn: p.column,
+            endLineNumber: p.line,
+            endColumn: p.column + 1,
+          })),
+        );
+        onProblemsChange?.(problems);
+      } catch {
+        // Linting is a convenience; a failed check must not break editing.
+      }
+    };
+
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(check, 600);
+    };
+
+    const model = editorRef.current?.getModel();
+    const listener = model?.onDidChangeContent(schedule);
+    schedule();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      listener?.dispose();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, ready]);
 
   return (
     <Editor
@@ -124,13 +213,30 @@ export function EditorPane({ provider, path }: Props) {
       options={{
         fontSize: 13,
         fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
-        minimap: { enabled: false },
+        fontLigatures: true,
+        minimap: { enabled: true, renderCharacters: false, maxColumn: 80 },
         scrollBeyondLastLine: false,
         smoothScrolling: true,
+        cursorSmoothCaretAnimation: 'on',
+        cursorBlinking: 'smooth',
         tabSize: 4,
+        insertSpaces: true,
         renderWhitespace: 'selection',
         automaticLayout: true,
         padding: { top: 12 },
+        bracketPairColorization: { enabled: true },
+        guides: { bracketPairs: true, indentation: true },
+        stickyScroll: { enabled: true },
+        suggestOnTriggerCharacters: true,
+        quickSuggestions: { other: true, comments: false, strings: false },
+        acceptSuggestionOnEnter: 'on',
+        tabCompletion: 'on',
+        wordBasedSuggestions: 'currentDocument',
+        formatOnPaste: true,
+        linkedEditing: true,
+        occurrencesHighlight: 'singleFile',
+        renderLineHighlight: 'line',
+        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
       }}
       loading={<div className="p-4 text-sm text-ink-dim">Loading editor…</div>}
     />
