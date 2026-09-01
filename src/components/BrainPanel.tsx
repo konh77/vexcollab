@@ -29,10 +29,13 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/** Every group is its own floating card, the way macOS settings panes read. */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="border-b border-edge px-4 py-3 last:border-b-0">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim">{title}</h3>
+    <section className="rounded-xl bg-panel-raised px-4 py-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-dim">
+        {title}
+      </h3>
       {children}
     </section>
   );
@@ -138,8 +141,8 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
   };
 
   return (
-    <div className="vc-scroll flex h-full flex-col overflow-y-auto">
-      <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
+    <div className="vc-scroll flex h-full flex-col gap-3 overflow-y-auto bg-panel p-2.5">
+      <div className="flex items-center gap-2 rounded-xl bg-panel-raised px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
         <span
           className={`size-2 rounded-full ${connected ? 'bg-ok' : 'bg-ink-dim'}`}
           aria-hidden
@@ -165,23 +168,39 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
       </div>
 
       {snapshot.lastError && (
-        <div className="flex items-start gap-2 border-b border-edge bg-vex/8 px-4 py-2 text-xs text-vex-soft">
-          <span className="flex-1">{snapshot.lastError}</span>
-          <button type="button" onClick={() => session.clearError()} aria-label="Dismiss error">
+        <div className="flex items-start gap-2.5 rounded-xl bg-panel-raised px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+          <svg
+            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            className="mt-px shrink-0 text-vex"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v4M12 16h.01" />
+          </svg>
+          <div className="flex-1">
+            <div className="mb-0.5 text-[13px] font-medium">Something went wrong</div>
+            <div className="text-[11.5px] leading-[1.45] text-ink-dim">{snapshot.lastError}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => session.clearError()}
+            aria-label="Dismiss error"
+            className="shrink-0 text-ink-dim transition hover:text-ink"
+          >
             ✕
           </button>
         </div>
       )}
 
       {snapshot.transfer && (
-        <div className="border-b border-edge px-4 py-2">
+        <div className="rounded-xl bg-panel-raised px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
           <div className="mb-1 flex justify-between text-xs text-ink-dim">
             <span>{snapshot.transfer.label}</span>
             <span>
               {Math.min(100, Math.round((snapshot.transfer.current / Math.max(1, snapshot.transfer.total)) * 100))}%
             </span>
           </div>
-          <div className="h-1 overflow-hidden rounded-full bg-panel">
+          <div className="h-1 overflow-hidden rounded-full bg-[#e8e8ed]">
             <div
               className="h-full rounded-full bg-vex transition-[width]"
               style={{
@@ -435,21 +454,26 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
             >
               Capture screen
             </button>
-            {screenshot && (
-              <div className="mt-2 space-y-1">
+            {screenshot ? (
+              <div className="mt-2.5 space-y-2">
+                {/* The V5 LCD is 480x272; keep that ratio so it looks like the brain. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={screenshot}
                   alt="VEX V5 brain screen"
-                  className="w-full rounded-lg border border-edge"
+                  className="w-full rounded-lg border border-black/10 bg-[#1b1b1f]"
+                  style={{ aspectRatio: '480 / 272' }}
                 />
-                <a
-                  href={screenshot}
-                  download="v5-screen.png"
-                  className="text-xs text-ink-dim underline hover:text-ink"
-                >
+                <a href={screenshot} download="v5-screen.png" className="text-[11.5px] text-vex hover:underline">
                   Save PNG
                 </a>
+              </div>
+            ) : (
+              <div
+                className="mt-2.5 grid place-items-center rounded-lg border border-black/10 bg-[#1b1b1f] text-[11px] text-[#86868b]"
+                style={{ aspectRatio: '480 / 272' }}
+              >
+                No capture yet
               </div>
             )}
           </Section>
@@ -457,9 +481,21 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
       )}
 
       {!connected && snapshot.connectionState !== 'connecting' && (
-        <div className="p-4 text-sm text-ink-dim">
-          Plug a V5 brain into USB and hit <span className="text-ink">Connect USB</span>. The
-          browser will ask which serial port to use — pick the VEX one.
+        <div className="flex flex-col items-center gap-2.5 rounded-xl bg-panel-raised px-4 py-5 text-center shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+          <svg
+            width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+            className="text-[#c7c7cc]"
+          >
+            <path d="M12 21V8" />
+            <circle cx="12" cy="22" r="1" fill="currentColor" />
+            <path d="M9 8V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4z" />
+            <path d="M8 13h3" />
+            <path d="M13 17h3" />
+          </svg>
+          <p className="max-w-[250px] text-[12px] leading-[1.5] text-ink-dim">
+            Plug a V5 into USB. The browser will ask which serial port to use — pick the VEX one.
+          </p>
         </div>
       )}
     </div>

@@ -196,6 +196,14 @@ export function GitHubPanel({ doc, roomId }: { doc: Y.Doc; roomId: string }) {
                 Use token
               </button>
             )}
+            <a
+              href="https://github.com/settings/tokens/new?scopes=repo&description=VEXCollab"
+              target="_blank"
+              rel="noreferrer"
+              className="block text-[10px] text-vex hover:underline"
+            >
+              Create a token →
+            </a>
           </div>
         )}
         {note && <p className="mt-1.5 break-words text-[10px] text-vex">{note}</p>}

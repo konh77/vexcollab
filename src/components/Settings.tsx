@@ -211,9 +211,22 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
                     Use
                   </button>
                 </div>
+                <p className="text-xs leading-relaxed text-ink-dim">
+                  <a
+                    href="https://github.com/settings/tokens/new?scopes=repo&description=VEXCollab"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-vex hover:underline"
+                  >
+                    Create a token →
+                  </a>{' '}
+                  opens GitHub with the right permission already ticked. Scroll down, press
+                  <span className="font-medium text-ink"> Generate token</span>, copy it, paste it
+                  above.
+                </p>
                 <p className="text-xs text-ink-dim">
-                  Lets you load a repository into a room and push your work back. The token stays
-                  on the server and is never written to disk.
+                  It lets you load a repository into a room and push your work back. The token
+                  stays on the server and is never written to disk.
                 </p>
               </div>
             )}
