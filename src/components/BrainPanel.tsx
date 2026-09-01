@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
-import { pythonPayload } from '@/lib/vex/program';
+import type { ProjectLanguage } from '@/lib/vex/program';
 import type { V5Session } from '@/lib/vex/session';
 import type { BrainSnapshot } from '@/lib/vex/types';
 
@@ -15,9 +15,10 @@ const SLOTS: SlotNumber[] = [1, 2, 3, 4, 5, 6, 7, 8];
 interface Props {
   session: V5Session;
   snapshot: BrainSnapshot;
-  /** Bundles every .py file in the room into the program to upload. */
-  getProgram: () => string;
+  /** Produces the bytes for a program slot, compiling first if this is C++. */
+  prepareProgram: () => Promise<{ payload: Uint8Array; log?: string }>;
   programFileCount: number;
+  language: ProjectLanguage;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -38,7 +39,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function BrainPanel({ session, snapshot, getProgram, programFileCount }: Props) {
+export function BrainPanel({ session, snapshot, prepareProgram, programFileCount, language }: Props) {
   const [slot, setSlot] = useState<SlotNumber>(1);
   const [programName, setProgramName] = useState('VEXCollab');
   const [description, setDescription] = useState('Uploaded from the browser');
@@ -48,6 +49,7 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
   const [insecureContext, setInsecureContext] = useState(false);
   const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
   const [firmwareArmed, setFirmwareArmed] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
 
   const connected = snapshot.connectionState === 'connected';
 
@@ -103,17 +105,17 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
 
   const upload = async () => {
     setBusy(true);
+    setBuildError(null);
     try {
+      // For C++ this is where the cross-compile happens; it can fail with real
+      // compiler diagnostics, which are worth showing verbatim.
+      const { payload } = await prepareProgram();
       const coldPayload = coldFile
         ? new Uint8Array(await coldFile.arrayBuffer())
         : undefined;
-      await session.upload({
-        slot,
-        name: programName,
-        description,
-        payload: pythonPayload(getProgram()),
-        coldPayload,
-      });
+      await session.upload({ slot, name: programName, description, payload, coldPayload });
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -296,12 +298,30 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
               />
 
               <p className="text-xs leading-relaxed text-ink-dim">
-                Bundles{' '}
-                <span className="font-medium text-ink">
-                  {programFileCount} Python file{programFileCount === 1 ? '' : 's'}
-                </span>{' '}
-                into one program in slot {slot} — modules first, <code>main.py</code> last.
+                {language === 'cpp' ? (
+                  <>
+                    Compiles{' '}
+                    <span className="font-medium text-ink">
+                      {programFileCount} C++ file{programFileCount === 1 ? '' : 's'}
+                    </span>{' '}
+                    with your ARM toolchain, then writes the binary to slot {slot}.
+                  </>
+                ) : (
+                  <>
+                    Bundles{' '}
+                    <span className="font-medium text-ink">
+                      {programFileCount} Python file{programFileCount === 1 ? '' : 's'}
+                    </span>{' '}
+                    into one program in slot {slot} — modules first, <code>main.py</code> last.
+                  </>
+                )}
               </p>
+
+              {buildError && (
+                <pre className="vc-scroll max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-vex/8 p-2 text-[10px] leading-relaxed text-vex-soft">
+                  {buildError}
+                </pre>
+              )}
 
               <details className="text-xs text-ink-dim">
                 <summary className="cursor-pointer select-none">Runtime image (advanced)</summary>
@@ -322,7 +342,7 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
                 disabled={busy || Boolean(snapshot.transfer)}
                 className="w-full rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
               >
-                Upload to slot {slot}
+                {language === 'cpp' ? `Build & upload to slot ${slot}` : `Upload to slot ${slot}`}
               </button>
             </div>
           </Section>

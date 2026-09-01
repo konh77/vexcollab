@@ -101,9 +101,43 @@ export function bundlePythonProject(
   return `${parts.join('\n')}\n`;
 }
 
+export type ProjectLanguage = 'python' | 'cpp';
+
+/**
+ * A project is C++ if it has any .cpp file. Python needs no build step; C++ has
+ * to be cross-compiled on the machine running the server.
+ */
+export function detectLanguage(files: ReadonlyArray<{ path: string }>): ProjectLanguage {
+  return files.some((f) => /\.(cpp|cc)$/.test(f.path)) ? 'cpp' : 'python';
+}
+
+export const STARTER_MAIN_CPP = `#include "vex.h"
+
+using namespace vex;
+
+brain Brain;
+controller Controller1;
+
+motor leftDrive = motor(PORT1, ratio18_1, false);
+motor rightDrive = motor(PORT10, ratio18_1, true);
+
+int main() {
+  Brain.Screen.print("Hello from VEXCollab");
+
+  while (true) {
+    int forward = Controller1.Axis3.position();
+    int turn = Controller1.Axis1.position();
+    leftDrive.spin(fwd, forward + turn, percent);
+    rightDrive.spin(fwd, forward - turn, percent);
+    wait(20, msec);
+  }
+}
+`;
+
 /** How many .py files a bundle will pull in, for showing in the UI. */
 export function countProgramFiles(files: ReadonlyArray<ProjectFile>): number {
-  return files.filter((f) => f.path.endsWith('.py')).length;
+  const cpp = files.filter((f) => /\.(cpp|cc)$/.test(f.path)).length;
+  return cpp > 0 ? cpp : files.filter((f) => f.path.endsWith('.py')).length;
 }
 
 export interface StarterFile {

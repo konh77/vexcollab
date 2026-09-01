@@ -8,7 +8,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { readAllFiles } from '@/lib/collab/project';
-import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
+import { bundlePythonProject, countProgramFiles, detectLanguage, pythonPayload } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { FileSidebar } from './FileSidebar';
@@ -33,13 +33,36 @@ export function Workspace({ roomId }: { roomId: string }) {
   const [showTerminal, setShowTerminal] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  // Every .py file in the room becomes one program; see bundlePythonProject.
-  const getProgram = useCallback(
-    () => (doc ? bundlePythonProject(readAllFiles(doc), PROGRAM_FILE) : ''),
-    [doc],
-  );
+  const language = detectLanguage(paths.map((path) => ({ path })));
 
-  const programFileCount = paths.filter((p) => p.endsWith('.py')).length;
+  /**
+   * Produces the bytes to write to a program slot. Python is bundled in the
+   * browser; C++ has to be cross-compiled, which only the machine running the
+   * server can do.
+   */
+  const prepareProgram = useCallback(async () => {
+    if (!doc) throw new Error('Not connected to the room yet');
+    const files = readAllFiles(doc);
+
+    if (detectLanguage(files) === 'python') {
+      return { payload: pythonPayload(bundlePythonProject(files, PROGRAM_FILE)) };
+    }
+
+    const response = await fetch('/api/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files }),
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error || 'Build failed');
+
+    const binary = atob(result.binBase64);
+    const payload = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) payload[i] = binary.charCodeAt(i);
+    return { payload, log: result.log as string | undefined };
+  }, [doc]);
+
+  const programFileCount = countProgramFiles(paths.map((path) => ({ path, contents: '' })));
 
   const copyLink = async () => {
     try {
@@ -142,8 +165,9 @@ export function Workspace({ roomId }: { roomId: string }) {
           <BrainPanel
             session={session}
             snapshot={snapshot}
-            getProgram={getProgram}
+            prepareProgram={prepareProgram}
             programFileCount={programFileCount}
+            language={language}
           />
         </aside>
       </div>

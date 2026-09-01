@@ -37,6 +37,13 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 - Live terminal of everything your program prints, and type back to it
 - Update vexOS
 
+**C++ as well as Python**
+- Python uploads as-is — no compiler, nothing to install
+- C++ is cross-compiled on the machine running the server, then uploaded the same way.
+  Needs an ARM toolchain (`brew install --cask gcc-arm-embedded`) and the V5 SDK, which
+  is found automatically from your VEXcode install. A project is treated as C++ as soon
+  as it contains a `.cpp` file.
+
 **Ship it**
 - Commit and push the room to a real GitHub repo, or pull your teammate's work in
 - Uses *your* git — no tokens to paste
@@ -140,6 +147,8 @@ if you don't see that bar, you are connected and it's one of these instead:
 | `VEXCOLLAB_PASSWORD` | Require a password | none |
 | `VEXCOLLAB_PROJECT_DIR` | Where Git commits go | `./vex-project` |
 | `VEXCOLLAB_HTTPS` | `1` serves TLS, so WebSerial works off-localhost | off |
+| `VEXCOLLAB_TOOLCHAIN` | Folder holding `arm-none-eabi-g++` | auto-detected |
+| `VEXCOLLAB_V5_SDK` | V5 C++ SDK path | found from VEXcode |
 
 ## From source
 
