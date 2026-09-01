@@ -7,11 +7,13 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
+import { rememberRoom } from '@/lib/collab/recent';
 import { readAllFiles } from '@/lib/collab/project';
 import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { CommandPalette, type Command } from './CommandPalette';
+import { Settings } from './Settings';
 import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
 import { GitHubPanel } from './GitHubPanel';
@@ -41,6 +43,7 @@ export function Workspace({ roomId }: { roomId: string }) {
   const [problemsByPath, setProblemsByPath] = useState<Record<string, number>>({});
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [copilot, setCopilot] = useState<'off' | 'signed-out' | 'ready' | 'thinking'>('off');
+  const [showSettings, setShowSettings] = useState(false);
 
   const getProgram = useCallback(
     () => (doc ? bundlePythonProject(readAllFiles(doc), PROGRAM_FILE) : ''),
@@ -65,6 +68,10 @@ export function Workspace({ roomId }: { roomId: string }) {
     },
     [active],
   );
+
+  useEffect(() => {
+    rememberRoom(roomId);
+  }, [roomId]);
 
   // Copilot is optional and off unless the server was started with it.
   useEffect(() => {
@@ -257,6 +264,15 @@ export function Workspace({ roomId }: { roomId: string }) {
           </button>
           <button
             type="button"
+            onClick={() => setShowSettings(true)}
+            aria-label="Settings"
+            title="Settings"
+            className="rounded-md bg-panel px-2 py-1 text-xs transition hover:bg-edge"
+          >
+            ⚙
+          </button>
+          <button
+            type="button"
             onClick={() => {
               // A full navigation, so the socket and any open serial port are
               // closed by teardown rather than left dangling.
@@ -334,6 +350,7 @@ export function Workspace({ roomId }: { roomId: string }) {
       />
 
       <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
+      <Settings open={showSettings} onClose={() => setShowSettings(false)} />
     </div>
   );
 }

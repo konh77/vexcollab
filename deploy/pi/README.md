@@ -80,6 +80,27 @@ sudo systemctl restart vexcollab
 Upgrade by re-running the installer — it is idempotent and keeps your password
 and data.
 
+## Dynamic DNS (do this — your IP will change)
+
+Home connections change address without warning. When that happens the domain
+points at a stranger's router until someone notices.
+
+**It costs nothing.** IONOS includes DynDNS with any domain you own; DuckDNS and
+No-IP have free tiers too.
+
+**IONOS:** developer portal → **DynDNS** → create an entry for your hostname →
+copy the **IPv4 update URL**. Then on the Pi:
+
+```bash
+sudo nano /etc/vexcollab-ddns.env      # paste the URL into DDNS_UPDATE_URL
+sudo systemctl start vexcollab-ddns.service
+journalctl -u vexcollab-ddns -n 20     # check it worked
+```
+
+A timer then checks every 5 minutes and only calls the provider when the address
+actually moved. It asks three separate services what your IP is, so one of them
+having a bad day cannot push a wrong record.
+
 ## If the Pi goes silent during install
 
 Normal. `next build` is the heaviest step, and on a Pi it takes 10–25 minutes

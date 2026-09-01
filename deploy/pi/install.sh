@@ -244,6 +244,56 @@ EOF
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 systemctl enable --now fail2ban >/dev/null 2>&1 || true
 
+# --- dynamic DNS ------------------------------------------------------------
+# Home IPs move. Without this the domain quietly points at someone else's
+# router until a human notices, which is always at the worst moment.
+log "Installing the dynamic DNS updater"
+install -m 755 "$APP_DIR/deploy/pi/ddns-update.sh" /usr/local/sbin/vexcollab-ddns
+
+if [ ! -f /etc/vexcollab-ddns.env ]; then
+  cat > /etc/vexcollab-ddns.env <<'EOF'
+# Paste your provider's update URL here, then:
+#   sudo systemctl start vexcollab-ddns.service
+#
+# IONOS:  developer portal -> DynDNS -> create -> copy the IPv4 update URL
+# DuckDNS: https://www.duckdns.org/update?domains=NAME&token=TOKEN
+# No-IP:   https://USER:PASS@dynupdate.no-ip.com/nic/update?hostname=HOST
+DDNS_UPDATE_URL=""
+EOF
+  chmod 600 /etc/vexcollab-ddns.env
+fi
+
+cat > /etc/systemd/system/vexcollab-ddns.service <<'EOF'
+[Unit]
+Description=Update dynamic DNS for VEXCollab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vexcollab-ddns
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/vexcollab
+EOF
+
+cat > /etc/systemd/system/vexcollab-ddns.timer <<'EOF'
+[Unit]
+Description=Check the public IP every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now vexcollab-ddns.timer
+
 # --- done -------------------------------------------------------------------
 PASSWORD_LINE="$(grep '^VEXCOLLAB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
 cat <<EOF
