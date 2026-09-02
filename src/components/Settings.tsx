@@ -31,6 +31,7 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
   const [code, setCode] = useState<{ userCode: string; verificationUri: string } | null>(null);
   const [pat, setPat] = useState('');
   const [copilot, setCopilot] = useState<string>('off');
+  const [copilotCode, setCopilotCode] = useState<{ userCode: string; verificationUri: string } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
 
@@ -64,6 +65,45 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  const copilotSignIn = async () => {
+    const result: ApiResult = await fetch('/api/copilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'signin' }),
+    })
+      .then((r) => r.json())
+      .catch(() => ({}));
+
+    if (result.error) return setNote(result.error);
+    if (!result.userCode) return setNote('Copilot did not return a code');
+
+    setCopilotCode({
+      userCode: result.userCode,
+      verificationUri: result.verificationUri ?? 'https://github.com/login/device',
+    });
+
+    // The server polls GitHub in the background; watch its status until the
+    // sign-in lands rather than making the user press anything again.
+    const deadline = Date.now() + 15 * 60 * 1000;
+    const poll = async () => {
+      if (Date.now() > deadline) return setCopilotCode(null);
+      const status: ApiResult = await fetch('/api/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'status' }),
+      })
+        .then((r) => r.json())
+        .catch(() => ({}));
+      if (status.signedIn) {
+        setCopilotCode(null);
+        setCopilot('signed in');
+        return;
+      }
+      setTimeout(poll, 5000);
+    };
+    setTimeout(poll, 5000);
+  };
 
   if (!open) return null;
 
@@ -324,11 +364,49 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">
               Copilot
             </h3>
-            <p className="text-sm text-ink-dim">
-              {copilot === 'off'
-                ? 'Not enabled on this server. Start it with --copilot to turn suggestions on.'
-                : `GitHub Copilot: ${copilot}.`}
-            </p>
+            {copilot === 'off' ? (
+              <p className="text-sm text-ink-dim">
+                Not enabled on this server. Set{' '}
+                <span className="rounded bg-panel px-1 py-0.5 font-mono text-xs">
+                  VEXCOLLAB_COPILOT=1
+                </span>{' '}
+                and restart to turn suggestions on.
+              </p>
+            ) : copilotCode ? (
+              <div className="space-y-2 text-sm">
+                <p className="text-ink-dim">Enter this code at GitHub:</p>
+                <div className="rounded-lg bg-panel px-3 py-2 text-center font-mono text-lg tracking-[0.3em]">
+                  {copilotCode.userCode}
+                </div>
+                <a
+                  href={copilotCode.verificationUri}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-center text-vex hover:underline"
+                >
+                  Open GitHub →
+                </a>
+                <p className="text-center text-xs text-ink-dim">Waiting for you to approve…</p>
+              </div>
+            ) : copilot === 'signed in' ? (
+              <p className="text-sm text-ink-dim">
+                Signed in. Suggestions appear as ghost text while you type — press Tab to accept.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={copilotSignIn}
+                  className="w-full rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                >
+                  Sign in to Copilot
+                </button>
+                <p className="text-xs leading-relaxed text-ink-dim">
+                  Needs your own Copilot subscription. The sign-in is shared by everyone using
+                  this server, so only do this on an instance that is yours.
+                </p>
+              </div>
+            )}
           </section>
 
           {note && <p className="text-xs text-vex">{note}</p>}
