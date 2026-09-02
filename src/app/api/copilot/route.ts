@@ -1,9 +1,20 @@
 /*
- * VEXCollab - Copilot endpoints.
+ * VEXCollab - Copilot endpoints, one language server per person.
  * Licensed under AGPL-3.0-only.
  */
 import { NextResponse } from 'next/server';
-import { copilot } from '@/lib/copilot/bridge';
+import { copilotEnabled, copilotFor, copilotSessionCount } from '@/lib/copilot/bridge';
+import { newSessionId } from '@/lib/github/store';
+
+const SID = 'vexcollab_sid';
+
+function readSid(request: Request): string | null {
+  for (const part of (request.headers.get('cookie') ?? '').split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k === SID) return rest.join('=');
+  }
+  return null;
+}
 
 export async function POST(request: Request) {
   let body: { action?: string; uri?: string; text?: string; line?: number; character?: number };
@@ -13,47 +24,77 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Bad request' }, { status: 400 });
   }
 
-  if (!copilot.enabled) {
-    return NextResponse.json({ enabled: false, running: false, signedIn: false, kind: 'Disabled', message: '' });
+  if (!copilotEnabled()) {
+    return NextResponse.json({
+      enabled: false,
+      running: false,
+      signedIn: false,
+      kind: 'Disabled',
+      message: '',
+    });
   }
+
+  // The session cookie is what keeps one person's Copilot separate from the
+  // next person's; without it we would be back to a shared account.
+  let sid = readSid(request);
+  let issued = false;
+  if (!sid) {
+    sid = newSessionId();
+    issued = true;
+  }
+
+  const copilot = copilotFor(sid);
+  const reply = (data: unknown, status = 200) => {
+    const response = NextResponse.json(data, { status });
+    if (issued) {
+      const secure =
+        request.headers.get('x-forwarded-proto') === 'https' || process.env.VEXCOLLAB_HTTPS === '1';
+      response.headers.append(
+        'Set-Cookie',
+        `${SID}=${sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${secure ? '; Secure' : ''}`,
+      );
+    }
+    return response;
+  };
 
   try {
     switch (body.action) {
       case 'status': {
-        // Starting is idempotent; this makes the first status call boot it.
-        // A failure here is reported, not swallowed — a silently dead bridge
-        // looks identical to "Copilot has no suggestions".
         let startError: string | undefined;
         await copilot.start().catch((error: Error) => {
           startError = error.message;
         });
-        return NextResponse.json({ ...copilot.status(), error: startError ?? copilot.status().error });
+        return reply({
+          ...copilot.status(),
+          activeSessions: copilotSessionCount(),
+          error: startError ?? copilot.status().error,
+        });
       }
 
       case 'signin':
-        return NextResponse.json(await copilot.signIn());
+        return reply(await copilot.signIn());
 
       case 'signout':
-        return NextResponse.json(await copilot.signOut());
+        return reply(await copilot.signOut());
 
       case 'complete': {
-        if (!copilot.status().signedIn) return NextResponse.json({ items: [] });
+        if (!copilot.status().signedIn) return reply({ items: [] });
         const items = await copilot.complete(
           body.uri ?? 'file:///main.py',
           body.text ?? '',
           body.line ?? 0,
           body.character ?? 0,
         );
-        return NextResponse.json({ items });
+        return reply({ items });
       }
 
       default:
-        return NextResponse.json({ error: `Unknown action: ${body.action}` }, { status: 400 });
+        return reply({ error: `Unknown action: ${body.action}` }, 400);
     }
   } catch (error) {
-    return NextResponse.json(
+    return reply(
       { error: error instanceof Error ? error.message : 'Copilot failed' },
-      { status: 500 },
+      500,
     );
   }
 }

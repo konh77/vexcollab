@@ -14,6 +14,7 @@
  * for.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
@@ -38,7 +39,17 @@ export interface CopilotSuggestion {
   range?: { start: { line: number; character: number }; end: { line: number; character: number } };
 }
 
-class CopilotBridge {
+export class CopilotBridge {
+  /**
+   * Each bridge gets its own HOME, which is where the language server keeps
+   * its credentials. That is what makes sign-in per person rather than one
+   * account shared by everyone on the server — Copilot is licensed per
+   * individual, so a shared seat is not ours to offer.
+   */
+  constructor(private readonly sessionId: string) {}
+
+  lastUsed = Date.now();
+
   private child: ChildProcessWithoutNullStreams | null = null;
   private buffer = Buffer.alloc(0);
   private nextId = 1;
@@ -164,7 +175,17 @@ class CopilotBridge {
       }
 
       this.lastError = undefined;
-      const child = spawn(process.execPath, [entry, '--stdio'], { stdio: 'pipe' });
+      const home = join(
+        process.env.VEXCOLLAB_DATA_DIR ?? join(process.cwd(), '.vexcollab-data'),
+        'copilot',
+        this.sessionId,
+      );
+      mkdirSync(home, { recursive: true, mode: 0o700 });
+
+      const child = spawn(process.execPath, [entry, '--stdio'], {
+        stdio: 'pipe',
+        env: { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, '.config') },
+      });
       this.child = child;
       child.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
       child.on('exit', () => {
@@ -194,6 +215,15 @@ class CopilotBridge {
     } finally {
       this.starting = null;
     }
+  }
+
+  stop() {
+    try {
+      this.child?.kill();
+    } catch {
+      // Already gone.
+    }
+    this.child = null;
   }
 
   status(): CopilotStatus {
@@ -273,7 +303,44 @@ class CopilotBridge {
   }
 }
 
-/** One bridge per server process, kept across hot reloads in dev. */
-const globalForCopilot = globalThis as unknown as { __vexCopilot?: CopilotBridge };
-export const copilot = globalForCopilot.__vexCopilot ?? new CopilotBridge();
-if (process.env.NODE_ENV !== 'production') globalForCopilot.__vexCopilot = copilot;
+/**
+ * One bridge per browser session. Each is a real subprocess, so idle ones are
+ * reaped — otherwise a busy afternoon leaves a dozen language servers resident
+ * on a Raspberry Pi.
+ */
+const IDLE_MS = 30 * 60 * 1000;
+
+const globalForCopilot = globalThis as unknown as {
+  __vexCopilotBySession?: Map<string, CopilotBridge>;
+};
+const registry = globalForCopilot.__vexCopilotBySession ?? new Map<string, CopilotBridge>();
+if (process.env.NODE_ENV !== 'production') globalForCopilot.__vexCopilotBySession = registry;
+
+export function copilotEnabled(): boolean {
+  return process.env.VEXCOLLAB_COPILOT === '1';
+}
+
+function reapIdle() {
+  const now = Date.now();
+  for (const [id, bridge] of registry) {
+    if (now - bridge.lastUsed > IDLE_MS) {
+      bridge.stop();
+      registry.delete(id);
+    }
+  }
+}
+
+export function copilotFor(sessionId: string): CopilotBridge {
+  reapIdle();
+  let bridge = registry.get(sessionId);
+  if (!bridge) {
+    bridge = new CopilotBridge(sessionId);
+    registry.set(sessionId, bridge);
+  }
+  bridge.lastUsed = Date.now();
+  return bridge;
+}
+
+export function copilotSessionCount(): number {
+  return registry.size;
+}

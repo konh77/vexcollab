@@ -8,11 +8,12 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { rememberRoom } from '@/lib/collab/recent';
-import { readAllFiles } from '@/lib/collab/project';
+import { readAllFiles, readFile } from '@/lib/collab/project';
 import { useAnalysis } from '@/lib/editor/useAnalysis';
 import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
+import { ChatPanel } from './ChatPanel';
 import { CommandPalette, type Command } from './CommandPalette';
 import { Settings } from './Settings';
 import { EditorTabs } from './EditorTabs';
@@ -45,6 +46,7 @@ export function Workspace({ roomId }: { roomId: string }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [copilot, setCopilot] = useState<'off' | 'signed-out' | 'ready' | 'thinking'>('off');
   const [showSettings, setShowSettings] = useState(false);
+  const [rail, setRail] = useState<'brain' | 'chat'>('brain');
 
   const getProgram = useCallback(
     () => (doc ? bundlePythonProject(readAllFiles(doc), PROGRAM_FILE) : ''),
@@ -160,6 +162,12 @@ export function Workspace({ roomId }: { roomId: string }) {
         run: () => void (isOpen ? terminal.close() : terminal.open()),
       },
       {
+        id: 'view.chat',
+        label: rail === 'chat' ? 'Show the brain panel' : 'Ask Copilot about this code',
+        group: 'View',
+        run: () => setRail((r) => (r === 'chat' ? 'brain' : 'chat')),
+      },
+      {
         id: 'app.settings',
         label: 'Open settings',
         group: 'App',
@@ -201,7 +209,7 @@ export function Workspace({ roomId }: { roomId: string }) {
     }
 
     return [...actions, ...fileCommands];
-  }, [paths, openFile, session, snapshot, showTerminal, isOpen, terminal, copilot]);
+  }, [paths, openFile, session, snapshot, showTerminal, isOpen, terminal, copilot, rail]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -373,7 +381,23 @@ export function Workspace({ roomId }: { roomId: string }) {
           )}
         </main>
 
-        <aside className="w-80 shrink-0 border-l border-edge bg-shell">
+        <aside className="flex w-80 shrink-0 flex-col border-l border-edge bg-shell">
+          <div className="flex shrink-0 gap-1 border-b border-edge bg-panel p-1">
+            {(['brain', 'chat'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setRail(tab)}
+                className={`flex-1 rounded-md px-2 py-1 text-[12px] font-medium capitalize transition ${
+                  rail === tab ? 'bg-panel-raised shadow-[0_1px_2px_rgba(0,0,0,0.08)]' : 'text-ink-dim hover:text-ink'
+                }`}
+              >
+                {tab === 'brain' ? 'Brain' : 'Chat'}
+              </button>
+            ))}
+          </div>
+
+          <div className={`min-h-0 flex-1 ${rail === 'brain' ? '' : 'hidden'}`}>
           <BrainPanel
             session={session}
             snapshot={snapshot}
@@ -383,6 +407,16 @@ export function Workspace({ roomId }: { roomId: string }) {
             findings={analysis.warnings}
             onJump={jumpTo}
           />
+          </div>
+
+          {/* Kept mounted so the conversation survives switching tabs. */}
+          <div className={`min-h-0 flex-1 ${rail === 'chat' ? '' : 'hidden'}`}>
+            <ChatPanel
+              getContext={() =>
+                doc ? { path: activePath, contents: readFile(doc, activePath) } : null
+              }
+            />
+          </div>
         </aside>
       </div>
 

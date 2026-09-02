@@ -77,17 +77,31 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 
 ## GitHub Copilot
 
+**One language server per person.** Each browser session gets its own Copilot
+process with its own credential store, so everyone signs in with their own
+account — Copilot is licensed per individual, and a shared seat is not something
+this app should offer. Idle sessions are reaped after 30 minutes so a busy
+afternoon does not leave a dozen servers resident.
+
+The **Chat** tab beside the brain panel talks to Copilot about the file you have
+open (it sends the current file as context, which you can turn off).
+
+
 ```bash
 npx github:ponpon77/vexcollab --copilot
 ```
 
-Then ⌘K → *Copilot: sign in*, and follow the device-flow code. Suggestions appear
-as ghost text while you type.
+Then **Settings → Copilot → Sign in**, and follow the device code. Suggestions
+appear as ghost text while you type; Tab accepts.
 
 Needs your own **Copilot subscription**. It runs GitHub's official
 `@github/copilot-language-server` — the same server Neovim and Emacs use — as a
 subprocess. VEXCollab never sees or stores your token; the language server owns it.
 Off unless you pass the flag, so nobody spawns a process they didn't ask for.
+
+GitHub sign-in for repositories and Copilot sign-in are **separate by necessity**:
+a `repo`-scoped OAuth token cannot authorise Copilot, which runs its own device
+flow. Both live in Settings, one after the other.
 
 ## Sign in with GitHub (optional)
 
