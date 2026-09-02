@@ -12,6 +12,13 @@ export interface SmartDeviceView {
   version: string;
 }
 
+export interface BrainFile {
+  filename: string;
+  size: number;
+  type: string;
+  timestamp: string;
+}
+
 export interface ControllerView {
   index: number;
   isMaster: boolean;
@@ -41,10 +48,14 @@ export interface BrainSnapshot {
   activeProgram: number;
   isRunningProgram: boolean;
   matchMode: 'driver' | 'autonomous' | 'disabled' | null;
+  isFieldControllerConnected: boolean;
+  button: { pressed: boolean; doublePressed: boolean };
+  screen: { reversed: boolean; whiteTheme: boolean; language: string | null };
   radio: {
     isAvailable: boolean;
     isConnected: boolean;
     isVexNet: boolean;
+    isRadioData: boolean;
     channel: string | null;
     latency: number | null;
   };
@@ -80,7 +91,17 @@ export const EMPTY_SNAPSHOT: BrainSnapshot = {
   activeProgram: 0,
   isRunningProgram: false,
   matchMode: null,
-  radio: { isAvailable: false, isConnected: false, isVexNet: false, channel: null, latency: null },
+  isFieldControllerConnected: false,
+  button: { pressed: false, doublePressed: false },
+  screen: { reversed: false, whiteTheme: false, language: null },
+  radio: {
+    isAvailable: false,
+    isConnected: false,
+    isVexNet: false,
+    isRadioData: false,
+    channel: null,
+    latency: null,
+  },
   devices: [],
   controllers: [],
   programs: [],

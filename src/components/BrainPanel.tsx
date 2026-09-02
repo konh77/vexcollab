@@ -10,7 +10,7 @@ import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
 import { PortMap } from './PortMap';
 import { pythonPayload } from '@/lib/vex/program';
 import type { V5Session } from '@/lib/vex/session';
-import type { BrainSnapshot } from '@/lib/vex/types';
+import type { BrainFile, BrainSnapshot } from '@/lib/vex/types';
 
 const SLOTS: SlotNumber[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
@@ -65,6 +65,8 @@ export function BrainPanel({
   const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
   const [firmwareArmed, setFirmwareArmed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [brainFiles, setBrainFiles] = useState<BrainFile[]>([]);
+  const [filesLoaded, setFilesLoaded] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
 
   const connected = snapshot.connectionState === 'connected';
@@ -299,6 +301,28 @@ export function BrainPanel({
             <Row label="vexOS" value={snapshot.systemVersion} />
             <Row label="CPU0 / CPU1" value={`${snapshot.cpu0Version ?? '—'} / ${snapshot.cpu1Version ?? '—'}`} />
             <Row label="Unique ID" value={snapshot.uniqueId?.toString(16).toUpperCase()} />
+            <Row
+              label="Screen"
+              value={`${snapshot.screen.whiteTheme ? 'Light' : 'Dark'}${
+                snapshot.screen.reversed ? ', reversed' : ''
+              }`}
+            />
+            {snapshot.screen.language && <Row label="Language" value={snapshot.screen.language} />}
+            <Row
+              label="Button"
+              value={
+                snapshot.button.doublePressed
+                  ? 'double-pressed'
+                  : snapshot.button.pressed
+                    ? 'pressed'
+                    : 'idle'
+              }
+            />
+            <Row
+              label="Field control"
+              value={snapshot.isFieldControllerConnected ? 'Connected' : 'None'}
+            />
+            <Row label="Match mode" value={snapshot.matchMode ?? '—'} />
           </Section>
 
           {snapshot.radio.isAvailable && (
@@ -307,6 +331,7 @@ export function BrainPanel({
               <Row label="Type" value={snapshot.radio.isVexNet ? 'VEXnet' : 'Bluetooth'} />
               <Row label="Channel" value={snapshot.radio.channel} />
               <Row label="Latency" value={snapshot.radio.latency != null ? `${snapshot.radio.latency} ms` : null} />
+              <Row label="Data link" value={snapshot.radio.isRadioData ? 'Active' : 'Idle'} />
             </Section>
           )}
 
@@ -504,6 +529,34 @@ export function BrainPanel({
                 ))}
               </ul>
             )}
+          </Section>
+
+          <Section title="Files on the brain">
+            <button
+              type="button"
+              onClick={async () => {
+                setBrainFiles(await session.listBrainFiles());
+                setFilesLoaded(true);
+              }}
+              className="mb-2 rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+            >
+              {filesLoaded ? 'Refresh' : 'List files'}
+            </button>
+            {filesLoaded &&
+              (brainFiles.length === 0 ? (
+                <p className="text-sm text-ink-dim">Nothing stored.</p>
+              ) : (
+                <ul className="space-y-0.5">
+                  {brainFiles.map((file) => (
+                    <li key={file.filename} className="flex gap-2 text-[12px]">
+                      <span className="flex-1 truncate font-mono">{file.filename}</span>
+                      <span className="shrink-0 text-ink-dim">
+                        {file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ))}
           </Section>
 
           <Section title="Firmware">

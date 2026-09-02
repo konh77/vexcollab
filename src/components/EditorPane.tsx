@@ -26,6 +26,8 @@ interface Props {
   path: string;
   /** VEX-specific findings for this file, shown alongside syntax errors. */
   findings?: { line: number; message: string; severity: 'error' | 'warning' }[];
+  /** Bumped by the parent to scroll to a line (search hits, tracebacks, checks). */
+  reveal?: { line: number; nonce: number } | null;
   onCursorChange?: (position: { line: number; column: number }) => void;
   onProblemsChange?: (problems: Problem[]) => void;
   onEditorReady?: (editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco) => void;
@@ -70,6 +72,7 @@ export function EditorPane({
   provider,
   path,
   findings = [],
+  reveal = null,
   onCursorChange,
   onProblemsChange,
   onEditorReady,
@@ -158,6 +161,15 @@ export function EditorPane({
     onEditorReady?.(editor, monaco);
     setReady(true);
   };
+
+  useEffect(() => {
+    if (!ready || !reveal) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.revealLineInCenter(reveal.line);
+    editor.setPosition({ lineNumber: reveal.line, column: 1 });
+    editor.focus();
+  }, [reveal, ready]);
 
   // Theme changes arrive after mount, so re-apply rather than only setting it
   // when the editor is created.

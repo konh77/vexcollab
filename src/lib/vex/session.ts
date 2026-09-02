@@ -19,7 +19,7 @@ import {
 import { V5SerialDevice } from '@/lib/v5-serial-protocol/VexDevice';
 import { ProgramIniConfig } from '@/lib/v5-serial-protocol/VexIniConfig';
 import { ScreenCaptureH2DPacket } from '@/lib/v5-serial-protocol/VexPacket';
-import { EMPTY_SNAPSHOT, type BrainSnapshot, type UploadRequest } from './types';
+import { EMPTY_SNAPSHOT, type BrainFile, type BrainSnapshot, type UploadRequest } from './types';
 import { decodeScreenCapture, SCREEN_CAPTURE_BYTES } from './screen';
 
 const VEX_USB_VENDOR_ID = 0x2888;
@@ -148,10 +148,22 @@ export class V5Session {
         activeProgram: brain.activeProgram ?? 0,
         isRunningProgram: brain.isRunningProgram,
         matchMode: (device.matchMode as BrainSnapshot['matchMode']) ?? null,
+        isFieldControllerConnected: Boolean(device.isFieldControllerConnected),
+        button: {
+          pressed: Boolean(brain.button.isPressed),
+          doublePressed: Boolean(brain.button.isDoublePressed),
+        },
+        screen: {
+          reversed: Boolean(brain.settings.isScreenReversed),
+          whiteTheme: Boolean(brain.settings.isWhiteTheme),
+          language:
+            brain.settings.usingLanguage != null ? String(brain.settings.usingLanguage) : null,
+        },
         radio: {
           isAvailable: Boolean(device.radio.isAvailable),
           isConnected: Boolean(device.radio.isConnected),
           isVexNet: Boolean(device.radio.isVexNet),
+          isRadioData: Boolean(device.radio.isRadioData),
           channel: device.radio.channel != null ? String(device.radio.channel) : null,
           latency: device.radio.latency ?? null,
         },
@@ -192,6 +204,35 @@ export class V5Session {
       });
     } catch (error) {
       this.fail(error, 'Reading program slots failed');
+    }
+  }
+
+  /** Everything stored on the brain, not just the program slots. */
+  async listBrainFiles(): Promise<BrainFile[]> {
+    const device = this.device;
+    if (!device?.isConnected) return [];
+    try {
+      const files = (await device.brain.listFiles()) ?? [];
+      return files.map((file: Record<string, any>) => ({
+        filename: String(file.filename ?? '?'),
+        size: Number(file.size ?? 0),
+        type: String(file.type ?? ''),
+        timestamp:
+          file.timestamp instanceof Date ? file.timestamp.toISOString() : String(file.timestamp ?? ''),
+      }));
+    } catch (error) {
+      this.fail(error, 'Listing files failed');
+      return [];
+    }
+  }
+
+  /** Arbitrary key/value read off the brain — useful for poking at settings. */
+  async readValue(key: string): Promise<string | null> {
+    try {
+      const value = await this.device?.brain.getValue(key);
+      return value != null ? String(value) : null;
+    } catch {
+      return null;
     }
   }
 

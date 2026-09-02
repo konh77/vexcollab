@@ -17,8 +17,11 @@ import {
   API_CONSTANTS,
   API_FUNCTIONS,
   GEAR_SETTINGS,
+  PARAM_VALUES,
   PORT_NAMES,
   type ApiClass,
+  type ApiMember,
+  type ApiParam,
 } from '@/lib/vex/api-reference';
 
 const CLASS_BY_NAME = new Map<string, ApiClass>(API_CLASSES.map((c) => [c.name, c]));
@@ -30,6 +33,71 @@ function inferVariableTypes(source: string): Map<string, ApiClass> {
   for (const match of source.matchAll(pattern)) {
     const cls = CLASS_BY_NAME.get(match[2]);
     if (cls) types.set(match[1], cls);
+  }
+  return types;
+}
+
+/**
+ * Where the caret is inside a call: which function, and which argument.
+ * Walks back over balanced brackets so a nested call does not confuse it.
+ */
+function callContext(line: string): { name: string; argIndex: number } | null {
+  let depth = 0;
+  let argIndex = 0;
+  for (let i = line.length - 1; i >= 0; i--) {
+    const ch = line[i];
+    if (ch === ')' || ch === ']' || ch === '}') depth++;
+    else if (ch === ']' || ch === '}') depth--;
+    else if (ch === '(') {
+      if (depth === 0) {
+        const before = line.slice(0, i);
+        const match = /([A-Za-z_]\w*)\s*$/.exec(before);
+        return match ? { name: match[1], argIndex } : null;
+      }
+      depth--;
+    } else if (ch === ',' && depth === 0) {
+      argIndex++;
+    }
+  }
+  return null;
+}
+
+/** Finds the API entry for a called name, whether method or free function. */
+function lookupCallable(
+  name: string,
+): { params?: ApiParam[]; signature: string; detail: string } | null {
+  for (const cls of API_CLASSES) {
+    if (cls.name === name) {
+      return {
+        params: cls.constructorParams,
+        signature: cls.constructor.replace(/\$\{\d+:([^}]*)\}/g, '$1'),
+        detail: cls.detail,
+      };
+    }
+    const member: ApiMember | undefined = cls.members.find((m) => m.name === name);
+    if (member?.params) {
+      return { params: member.params, signature: member.signature, detail: member.detail };
+    }
+  }
+  const fn = API_FUNCTIONS.find((f) => f.name === name);
+  if (fn) return { params: fn.params, signature: fn.signature, detail: fn.detail };
+  return null;
+}
+
+/** Literal assignments give a variable an obvious type: `armed = True` -> bool. */
+function inferLiteralTypes(source: string): Map<string, string> {
+  const types = new Map<string, string>();
+  const pattern = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*$/gm;
+  for (const match of source.matchAll(pattern)) {
+    const value = match[2];
+    let kind: string | null = null;
+    if (/^(True|False)$/.test(value)) kind = 'bool';
+    else if (/^-?\d+$/.test(value)) kind = 'int';
+    else if (/^-?\d*\.\d+$/.test(value)) kind = 'float';
+    else if (/^(['"]).*\1$/.test(value)) kind = 'str';
+    else if (/^\[.*\]$/.test(value)) kind = 'list';
+    else if (/^\{.*\}$/.test(value)) kind = 'dict';
+    if (kind) types.set(match[1], kind);
   }
   return types;
 }
@@ -69,6 +137,29 @@ export function registerVexPython(monaco: Monaco): () => void {
       });
       const word = model.getWordUntilPosition(position);
       const range = new Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+
+      // --- inside a call: offer only what fits this parameter
+      const call = callContext(line);
+      if (call && !/\.\w*$/.test(line)) {
+        const callable = lookupCallable(call.name);
+        const param = callable?.params?.[call.argIndex];
+        if (param) {
+          const values = PARAM_VALUES[param.kind];
+          if (values.length > 0) {
+            return {
+              suggestions: values.map((value) => ({
+                label: value.label,
+                kind: param.kind === 'boolean' ? Kind.Keyword : Kind.EnumMember,
+                detail: `${param.name} — ${value.detail}`,
+                insertText: value.label,
+                // Sorted ahead of the generic list, which stays available.
+                sortText: '0',
+                range,
+              })),
+            };
+          }
+        }
+      }
 
       // --- member access: something.<caret>
       const dotted = line.match(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.\w*$/);
@@ -201,12 +292,91 @@ export function registerVexPython(monaco: Monaco): () => void {
       const constant = API_CONSTANTS.find((c) => c.name === word.word);
       if (constant) return { contents: [{ value: `**${constant.name}** — ${constant.detail}` }] };
 
+      // A device the file declares, or a plain literal — say what it is.
+      const source = model.getValue();
+      const deviceType = inferVariableTypes(source).get(word.word);
+      if (deviceType) {
+        return {
+          contents: [
+            { value: '```python\n' + `${word.word}: ${deviceType.name}` + '\n```' },
+            { value: deviceType.detail },
+          ],
+        };
+      }
+      const literal = inferLiteralTypes(source).get(word.word);
+      if (literal) {
+        return { contents: [{ value: '```python\n' + `${word.word}: ${literal}` + '\n```' }] };
+      }
+
       return null;
+    },
+  });
+
+  const signatures = languages.registerSignatureHelpProvider('python', {
+    signatureHelpTriggerCharacters: ['(', ','],
+    provideSignatureHelp(model, position) {
+      const line = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      });
+      const call = callContext(line);
+      if (!call) return null;
+      const callable = lookupCallable(call.name);
+      if (!callable) return null;
+
+      const parameters = (callable.params ?? []).map((p) => ({
+        label: p.name,
+        documentation: p.optional ? `${p.kind} (optional)` : p.kind,
+      }));
+
+      return {
+        value: {
+          signatures: [
+            {
+              label: callable.signature,
+              documentation: callable.detail,
+              parameters,
+            },
+          ],
+          activeSignature: 0,
+          activeParameter: Math.min(call.argIndex, Math.max(parameters.length - 1, 0)),
+        },
+        dispose() {
+          // Nothing retained.
+        },
+      };
+    },
+  });
+
+  // Clicking a name lights up every other use of it. Monaco only does this for
+  // languages that provide highlights, and Python here has no language service.
+  const highlights = languages.registerDocumentHighlightProvider('python', {
+    provideDocumentHighlights(model, position) {
+      const word = model.getWordAtPosition(position);
+      if (!word || word.word.length < 2) return [];
+
+      const matches = model.findMatches(
+        word.word,
+        true,   // search the whole model
+        false,  // not a regex
+        true,   // match case
+        ' \t\n.,()[]{}:;=+-*/<>!&|%',  // word separators
+        false,
+      );
+
+      return matches.map((match) => ({
+        range: match.range,
+        kind: languages.DocumentHighlightKind.Text,
+      }));
     },
   });
 
   return () => {
     completions.dispose();
     hovers.dispose();
+    signatures.dispose();
+    highlights.dispose();
   };
 }

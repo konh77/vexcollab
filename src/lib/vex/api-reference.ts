@@ -8,32 +8,117 @@
  * teaching the editor a new call.
  */
 
+/**
+ * What kind of value belongs in a parameter slot. Knowing this is what lets the
+ * editor offer PERCENT instead of every constant in the API when your caret is
+ * in the units argument.
+ */
+export type ParamKind =
+  | 'direction'
+  | 'turnDirection'
+  | 'velocityUnit'
+  | 'rotationUnit'
+  | 'timeUnit'
+  | 'distanceUnit'
+  | 'currentUnit'
+  | 'brakeType'
+  | 'boolean'
+  | 'number'
+  | 'port'
+  | 'gearSetting'
+  | 'text';
+
+export interface ApiParam {
+  name: string;
+  kind: ParamKind;
+  optional?: boolean;
+}
+
 export interface ApiMember {
   name: string;
   signature: string;
   detail: string;
   /** Insert text with ${n:placeholder} tab stops, Monaco snippet syntax. */
   snippet?: string;
+  params?: ApiParam[];
 }
+
+/** The values that are valid for each parameter kind. */
+export const PARAM_VALUES: Record<ParamKind, { label: string; detail: string }[]> = {
+  direction: [
+    { label: 'FORWARD', detail: 'Spin forwards' },
+    { label: 'REVERSE', detail: 'Spin backwards' },
+  ],
+  turnDirection: [
+    { label: 'LEFT', detail: 'Turn left' },
+    { label: 'RIGHT', detail: 'Turn right' },
+  ],
+  velocityUnit: [
+    { label: 'PERCENT', detail: '-100 to 100' },
+    { label: 'RPM', detail: 'Revolutions per minute' },
+    { label: 'DPS', detail: 'Degrees per second' },
+  ],
+  rotationUnit: [
+    { label: 'DEGREES', detail: '360 per revolution' },
+    { label: 'TURNS', detail: 'Whole revolutions' },
+  ],
+  timeUnit: [
+    { label: 'MSEC', detail: 'Milliseconds' },
+    { label: 'SECONDS', detail: 'Seconds' },
+  ],
+  distanceUnit: [
+    { label: 'MM', detail: 'Millimetres' },
+    { label: 'INCHES', detail: 'Inches' },
+  ],
+  currentUnit: [{ label: 'AMP', detail: 'Amps' }],
+  brakeType: [
+    { label: 'COAST', detail: 'Freewheel to a stop' },
+    { label: 'BRAKE', detail: 'Stop, then release' },
+    { label: 'HOLD', detail: 'Stop and actively hold position' },
+  ],
+  boolean: [
+    { label: 'True', detail: 'boolean' },
+    { label: 'False', detail: 'boolean' },
+  ],
+  number: [],
+  port: Array.from({ length: 21 }, (_, i) => ({
+    label: `Ports.PORT${i + 1}`,
+    detail: 'Smart port',
+  })),
+  gearSetting: [
+    { label: 'GearSetting.RATIO_36_1', detail: 'Red — 100 rpm, most torque' },
+    { label: 'GearSetting.RATIO_18_1', detail: 'Green — 200 rpm, the usual choice' },
+    { label: 'GearSetting.RATIO_6_1', detail: 'Blue — 600 rpm, fastest' },
+  ],
+  text: [],
+};
 
 export interface ApiClass {
   name: string;
   detail: string;
   constructor: string;
+  constructorParams?: ApiParam[];
   members: ApiMember[];
 }
 
 const MOTOR_MEMBERS: ApiMember[] = [
-  { name: 'spin', signature: 'spin(direction, velocity, units)', detail: 'Spin the motor continuously.', snippet: 'spin(${1:FORWARD}, ${2:50}, ${3:PERCENT})' },
-  { name: 'spin_for', signature: 'spin_for(direction, amount, units, wait=True)', detail: 'Spin a set distance, blocking by default.', snippet: 'spin_for(${1:FORWARD}, ${2:90}, ${3:DEGREES})' },
+  { name: 'spin', signature: 'spin(direction, velocity, units)', detail: 'Spin the motor continuously.', snippet: 'spin(${1:FORWARD}, ${2:50}, ${3:PERCENT})',
+    params: [{ name: 'direction', kind: 'direction' }, { name: 'velocity', kind: 'number', optional: true }, { name: 'units', kind: 'velocityUnit', optional: true }] },
+  { name: 'spin_for', signature: 'spin_for(direction, amount, units, wait=True)', detail: 'Spin a set distance, blocking by default.', snippet: 'spin_for(${1:FORWARD}, ${2:90}, ${3:DEGREES})',
+    params: [{ name: 'direction', kind: 'direction' }, { name: 'amount', kind: 'number' }, { name: 'units', kind: 'rotationUnit' }, { name: 'wait', kind: 'boolean', optional: true }] },
   { name: 'spin_to_position', signature: 'spin_to_position(position, units, wait=True)', detail: 'Rotate to an absolute encoder position.', snippet: 'spin_to_position(${1:0}, ${2:DEGREES})' },
-  { name: 'stop', signature: 'stop(mode=None)', detail: 'Stop the motor, optionally with COAST, BRAKE or HOLD.', snippet: 'stop()' },
-  { name: 'set_velocity', signature: 'set_velocity(velocity, units)', detail: 'Default velocity for later moves.', snippet: 'set_velocity(${1:50}, ${2:PERCENT})' },
-  { name: 'set_stopping', signature: 'set_stopping(mode)', detail: 'COAST, BRAKE or HOLD when the motor stops.', snippet: 'set_stopping(${1:BRAKE})' },
+  { name: 'stop', signature: 'stop(mode=None)', detail: 'Stop the motor, optionally with COAST, BRAKE or HOLD.', snippet: 'stop()',
+    params: [{ name: 'mode', kind: 'brakeType', optional: true }] },
+  { name: 'set_velocity', signature: 'set_velocity(velocity, units)', detail: 'Default velocity for later moves.', snippet: 'set_velocity(${1:50}, ${2:PERCENT})',
+    params: [{ name: 'velocity', kind: 'number' }, { name: 'units', kind: 'velocityUnit' }] },
+  { name: 'set_stopping', signature: 'set_stopping(mode)', detail: 'COAST, BRAKE or HOLD when the motor stops.', snippet: 'set_stopping(${1:BRAKE})',
+    params: [{ name: 'mode', kind: 'brakeType' }] },
   { name: 'set_position', signature: 'set_position(value, units)', detail: 'Redefine the current encoder position.', snippet: 'set_position(${1:0}, ${2:DEGREES})' },
   { name: 'set_timeout', signature: 'set_timeout(time, units)', detail: 'Give up on a blocking move after this long.', snippet: 'set_timeout(${1:2}, ${2:SECONDS})' },
-  { name: 'position', signature: 'position(units) -> float', detail: 'Current encoder position.', snippet: 'position(${1:DEGREES})' },
-  { name: 'velocity', signature: 'velocity(units) -> float', detail: 'Current velocity.', snippet: 'velocity(${1:PERCENT})' },
+  { name: 'position', signature: 'position(units) -> float', detail: 'Current encoder position.', snippet: 'position(${1:DEGREES})',
+    params: [{ name: 'units', kind: 'rotationUnit' }] },
+  { name: 'velocity', signature: 'velocity(units) -> float', detail: 'Current velocity.', snippet: 'velocity(${1:PERCENT})',
+    params: [{ name: 'units', kind: 'velocityUnit' }] },
   { name: 'temperature', signature: 'temperature(units) -> float', detail: 'Motor temperature — worth checking mid-match.', snippet: 'temperature(${1:PERCENT})' },
   { name: 'current', signature: 'current(units) -> float', detail: 'Current draw.', snippet: 'current(${1:AMP})' },
   { name: 'is_spinning', signature: 'is_spinning() -> bool', detail: 'True while a move is in progress.', snippet: 'is_spinning()' },
@@ -76,6 +161,11 @@ export const API_CLASSES: ApiClass[] = [
     name: 'Motor',
     detail: 'A smart motor. Motor(port, gears, reversed)',
     constructor: 'Motor(${1:Ports.PORT1}, ${2:GearSetting.RATIO_18_1}, ${3:False})',
+    constructorParams: [
+      { name: 'port', kind: 'port' },
+      { name: 'gears', kind: 'gearSetting', optional: true },
+      { name: 'reversed', kind: 'boolean', optional: true },
+    ],
     members: MOTOR_MEMBERS,
   },
   {
@@ -156,7 +246,8 @@ export const API_CLASSES: ApiClass[] = [
 
 /** Free functions available after `from vex import *`. */
 export const API_FUNCTIONS: ApiMember[] = [
-  { name: 'wait', signature: 'wait(time, units)', detail: 'Pause. Always put one in a while loop or the brain locks up.', snippet: 'wait(${1:20}, ${2:MSEC})' },
+  { name: 'wait', signature: 'wait(time, units)', detail: 'Pause. Always put one in a while loop or the brain locks up.', snippet: 'wait(${1:20}, ${2:MSEC})',
+    params: [{ name: 'time', kind: 'number' }, { name: 'units', kind: 'timeUnit' }] },
   { name: 'print', signature: 'print(*values)', detail: 'Print to the terminal — shows in the VEXCollab terminal panel.', snippet: 'print(${1:value})' },
 ];
 

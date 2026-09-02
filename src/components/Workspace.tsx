@@ -15,6 +15,7 @@ import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { ChatPanel } from './ChatPanel';
 import { CommandPalette, type Command } from './CommandPalette';
+import { SearchPanel } from './SearchPanel';
 import { Settings } from './Settings';
 import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
@@ -47,6 +48,8 @@ export function Workspace({ roomId }: { roomId: string }) {
   const [copilot, setCopilot] = useState<'off' | 'signed-out' | 'ready' | 'thinking'>('off');
   const [showSettings, setShowSettings] = useState(false);
   const [rail, setRail] = useState<'brain' | 'chat'>('brain');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [reveal, setReveal] = useState<{ line: number; nonce: number } | null>(null);
 
   const getProgram = useCallback(
     () => (doc ? bundlePythonProject(readAllFiles(doc), PROGRAM_FILE) : ''),
@@ -69,8 +72,14 @@ export function Workspace({ roomId }: { roomId: string }) {
     setActive(path);
   }, []);
 
-  /** Jumping from a finding or the port map opens the file it lives in. */
-  const jumpTo = useCallback((file: string) => openFile(file), [openFile]);
+  /** Opens a file and, when a line is given, scrolls to it. */
+  const jumpTo = useCallback(
+    (file: string, line?: number) => {
+      openFile(file);
+      if (line) setReveal({ line, nonce: Date.now() });
+    },
+    [openFile],
+  );
 
   const closeTab = useCallback(
     (path: string) => {
@@ -162,6 +171,13 @@ export function Workspace({ roomId }: { roomId: string }) {
         run: () => void (isOpen ? terminal.close() : terminal.open()),
       },
       {
+        id: 'view.search',
+        label: 'Search in all files',
+        group: 'View',
+        hint: '⌘⇧F',
+        run: () => setSearchOpen(true),
+      },
+      {
         id: 'view.chat',
         label: rail === 'chat' ? 'Show the brain panel' : 'Ask Copilot about this code',
         group: 'View',
@@ -225,6 +241,10 @@ export function Workspace({ roomId }: { roomId: string }) {
       if (mod && event.key.toLowerCase() === 'j') {
         event.preventDefault();
         setShowTerminal((v) => !v);
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setSearchOpen(true);
       }
       // Cmd-, is the macOS convention for preferences.
       if (mod && event.key === ',') {
@@ -354,6 +374,7 @@ export function Workspace({ roomId }: { roomId: string }) {
               <EditorPane
                 provider={provider}
                 path={activePath}
+                reveal={reveal}
                 findings={analysis.warnings
                   .filter((w) => w.file === activePath)
                   .map((w) => ({ line: w.line, message: w.message, severity: w.severity }))}
@@ -432,6 +453,12 @@ export function Workspace({ roomId }: { roomId: string }) {
       />
 
       <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
+      <SearchPanel
+        open={searchOpen}
+        files={doc ? readAllFiles(doc) : []}
+        onClose={() => setSearchOpen(false)}
+        onJump={jumpTo}
+      />
       <Settings open={showSettings} onClose={() => setShowSettings(false)} />
     </div>
   );

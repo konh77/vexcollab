@@ -29,7 +29,9 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 - Rooms are just links — no sign-up, nothing saved to disk, gone when everyone leaves
 
 **Talk to the brain** — click *Connect USB*
-- Battery, vexOS version, brain name, team number (edit them in place)
+- Battery, vexOS and CPU versions, unique ID, brain name and team number (editable),
+  screen theme and orientation, language, brain button state, field-control status
+- Files stored on the brain, not just program slots
 - Every smart port: what's plugged in, where, and its firmware
 - Controller battery and radio status
 - Upload your program to any slot, run it, stop it
@@ -60,6 +62,14 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
   `left_drive = Motor(...)`
 - **Live syntax checking** — red squiggles and a problem count before you upload,
   not after the program refuses to start on the field
+- **Click a name to light up every other use of it** in the file
+- **Argument-aware completion** — with the caret in a units slot you get PERCENT,
+  RPM, DPS, not the whole API; in a boolean slot, True/False; in a port slot, the
+  21 ports. Signature help shows which parameter you are on
+- **Hover tells you the type** — a declared device, or `bool`/`float`/`str`
+  inferred from a literal assignment
+- **Search every file** (⌘⇧F) with match-case and whole-word, grouped by file,
+  click to jump to the line
 - **Command palette** (⌘K) for files and actions, editor tabs, status bar,
   minimap, sticky scroll, bracket colouring, hover docs
 - **Light, dark, or follow your system** — the whole app and the editor, applied
