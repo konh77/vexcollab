@@ -20,6 +20,18 @@ import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
 
+// Load .env.local before anything reads process.env. Node has done this
+// natively since 21.7, so no dotenv dependency is needed. Values already in the
+// environment win, which is what lets systemd's EnvironmentFile override a file
+// left in the working directory.
+for (const file of ['.env.local', '.env']) {
+  try {
+    process.loadEnvFile(file);
+  } catch {
+    // Missing file, or a Node too old to have loadEnvFile: both fine.
+  }
+}
+
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST ?? '0.0.0.0';
 const port = Number(process.env.PORT ?? 3000);
