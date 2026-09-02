@@ -15,6 +15,10 @@ export interface Prefs {
   wordWrap: boolean;
   minimap: boolean;
   lineNumbers: boolean;
+  fontFamily: string;
+  ligatures: boolean;
+  /** 'auto' follows the app's light/dark setting. */
+  editorTheme: string;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -23,6 +27,9 @@ export const DEFAULT_PREFS: Prefs = {
   wordWrap: false,
   minimap: true,
   lineNumbers: true,
+  fontFamily: 'system',
+  ligatures: true,
+  editorTheme: 'auto',
 };
 
 const KEY = 'vexcollab.prefs';

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { createRoomId } from '@/lib/collab/identity';
 import { forgetRoom, loadRecent, rememberRoom, type RecentRoom } from '@/lib/collab/recent';
 import { DemoPreview } from '@/components/DemoPreview';
+import { NewRoom } from '@/components/NewRoom';
 import { Settings } from '@/components/Settings';
 
 export default function Home() {
@@ -12,14 +13,19 @@ export default function Home() {
   const [joinId, setJoinId] = useState('');
   const [recent, setRecent] = useState<RecentRoom[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNew, setShowNew] = useState(false);
 
   useEffect(() => {
     setRecent(loadRecent());
   }, [showSettings]);
 
-  const go = (id: string) => {
+  const go = (id: string, options?: { template?: string; repo?: string }) => {
     rememberRoom(id);
-    router.push(`/room/${encodeURIComponent(id)}`);
+    const query = new URLSearchParams();
+    if (options?.template) query.set('t', options.template);
+    if (options?.repo) query.set('repo', options.repo);
+    const suffix = query.toString() ? `?${query}` : '';
+    router.push(`/room/${encodeURIComponent(id)}${suffix}`);
   };
 
   return (
@@ -77,7 +83,7 @@ export default function Home() {
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
           <button
             type="button"
-            onClick={() => go(createRoomId())}
+            onClick={() => setShowNew(true)}
             className="rounded-full bg-vex px-[26px] py-3 text-[15px] font-medium tracking-[-0.01em] text-white transition hover:bg-vex-soft"
           >
             Start a room
@@ -142,6 +148,14 @@ export default function Home() {
         </div>
       </section>
 
+      <NewRoom
+        open={showNew}
+        onClose={() => setShowNew(false)}
+        onStart={(options) => {
+          setShowNew(false);
+          go(createRoomId(), options);
+        }}
+      />
       <Settings open={showSettings} onClose={() => setShowSettings(false)} />
     </main>
   );

@@ -5,7 +5,7 @@
 'use client';
 
 import * as Y from 'yjs';
-import { starterProject } from '@/lib/vex/program';
+import { templateById } from '@/lib/vex/templates';
 
 export const FILES_KEY = 'files';
 
@@ -23,16 +23,21 @@ export function listPaths(doc: Y.Doc): string[] {
 }
 
 /**
- * Seeds a brand-new room. Runs inside a transaction and re-checks emptiness so
- * two people opening the link at the same instant cannot double-seed.
+ * Seeds a brand-new room from a template. Runs inside a transaction and
+ * re-checks emptiness so two people opening the link at the same instant
+ * cannot double-seed.
+ *
+ * A room opened from a GitHub repo is seeded with nothing — the clone fills it,
+ * and template files would only have to be deleted again.
  */
-export function ensureStarterFiles(doc: Y.Doc) {
+export function ensureStarterFiles(doc: Y.Doc, templateId?: string | null) {
   const files = getFiles(doc);
   if (files.size > 0) return;
+  if (templateId === 'none') return;
 
   doc.transact(() => {
     if (files.size > 0) return;
-    for (const file of starterProject()) {
+    for (const file of templateById(templateId).files) {
       const text = new Y.Text();
       text.insert(0, file.contents);
       files.set(file.path, text);

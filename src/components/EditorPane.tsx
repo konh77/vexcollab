@@ -12,6 +12,7 @@ import type * as Y from 'yjs';
 import type { CollabProvider } from '@/lib/collab/provider';
 import { getFiles } from '@/lib/collab/project';
 import { usePrefs, resolveTheme } from '@/lib/editor/prefs';
+import { autoTheme, fontStack, registerThemes } from '@/lib/editor/themes';
 import { registerVexPython } from '@/lib/editor/vex-language';
 import { languageForPath } from '@/lib/vex/program';
 
@@ -87,7 +88,9 @@ export function EditorPane({
   const findingsRef = useRef(findings);
   findingsRef.current = findings;
   const prefs = usePrefs();
-  const theme = resolveTheme(prefs.theme);
+  const appearance = resolveTheme(prefs.theme);
+  const activeTheme =
+    prefs.editorTheme === 'auto' ? autoTheme(appearance) : prefs.editorTheme;
 
   useRemoteCursorStyles(provider);
 
@@ -106,52 +109,8 @@ export function EditorPane({
     editorRef.current = editor;
     monacoRef.current = monaco;
 
-    // Xcode's light palette: the most Apple-native syntax colouring there is.
-    monaco.editor.defineTheme('vexcollab', {
-      base: 'vs',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '707F8C' },
-        { token: 'keyword', foreground: 'AD3DA4' },
-        { token: 'string', foreground: 'D12F1B' },
-        { token: 'number', foreground: '272AD8' },
-        { token: 'type', foreground: '3900A0' },
-        { token: 'type.identifier', foreground: '3900A0' },
-        { token: 'identifier', foreground: '1D1D1F' },
-      ],
-      colors: {
-        'editor.background': '#ffffff',
-        'editorGutter.background': '#ffffff',
-        'editorLineNumber.foreground': '#b8b8bf',
-        'editorLineNumber.activeForeground': '#6e6e73',
-        'editor.lineHighlightBackground': '#f5f5f7',
-        'editor.selectionBackground': '#b3d7ff',
-        'editorIndentGuide.background1': '#eeeef0',
-      },
-    });
-    // One Above/Xcode-style dark to match the app's dark tokens.
-    monaco.editor.defineTheme('vexcollab-dark', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '7F8C98' },
-        { token: 'keyword', foreground: 'FF7AB2' },
-        { token: 'string', foreground: 'FF8170' },
-        { token: 'number', foreground: 'D9C97C' },
-        { token: 'type', foreground: 'DABAFF' },
-        { token: 'type.identifier', foreground: 'DABAFF' },
-        { token: 'identifier', foreground: 'F2F2F7' },
-      ],
-      colors: {
-        'editor.background': '#1c1c1e',
-        'editorGutter.background': '#1c1c1e',
-        'editorLineNumber.foreground': '#48484a',
-        'editorLineNumber.activeForeground': '#8e8e93',
-        'editor.lineHighlightBackground': '#242426',
-        'editor.selectionBackground': '#2f5d8c',
-      },
-    });
-    monaco.editor.setTheme(theme === 'dark' ? 'vexcollab-dark' : 'vexcollab');
+    registerThemes(monaco);
+    monaco.editor.setTheme(activeTheme);
 
     editor.onDidChangeCursorPosition((event) =>
       onCursorChange?.({ line: event.position.lineNumber, column: event.position.column }),
@@ -175,8 +134,8 @@ export function EditorPane({
   // when the editor is created.
   useEffect(() => {
     if (!ready || !monacoRef.current) return;
-    monacoRef.current.editor.setTheme(theme === 'dark' ? 'vexcollab-dark' : 'vexcollab');
-  }, [theme, ready]);
+    monacoRef.current.editor.setTheme(activeTheme);
+  }, [activeTheme, ready]);
 
   // Language intelligence is global to Monaco, not per-editor, so it is
   // registered once and disposed when this pane goes away.
@@ -271,8 +230,8 @@ export function EditorPane({
       onMount={handleMount}
       options={{
         fontSize: prefs.fontSize,
-        fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
-        fontLigatures: true,
+        fontFamily: fontStack(prefs.fontFamily),
+        fontLigatures: prefs.ligatures,
         wordWrap: prefs.wordWrap ? 'on' : 'off',
         lineNumbers: prefs.lineNumbers ? 'on' : 'off',
         minimap: { enabled: prefs.minimap, renderCharacters: false, maxColumn: 80 },

@@ -19,7 +19,7 @@ export interface CollabState {
   error: string | null;
 }
 
-export function useCollab(roomId: string): CollabState {
+export function useCollab(roomId: string, templateId?: string | null): CollabState {
   const [provider, setProvider] = useState<CollabProvider | null>(null);
   const [connected, setConnected] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
@@ -41,7 +41,7 @@ export function useCollab(roomId: string): CollabState {
     // Seed only after the server has handed us the existing document, so we
     // never overwrite a room that already has files.
     const offSynced = instance.onSynced(() => {
-      ensureStarterFiles(instance.doc);
+      ensureStarterFiles(instance.doc, templateId);
       syncPaths();
     });
 
@@ -56,6 +56,7 @@ export function useCollab(roomId: string): CollabState {
       instance.destroy();
       setProvider(null);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
   return { provider, doc: provider?.doc ?? null, connected, peers, paths, error };

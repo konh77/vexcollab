@@ -5,10 +5,10 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { rememberRoom } from '@/lib/collab/recent';
-import { readAllFiles, readFile } from '@/lib/collab/project';
+import { applyIncomingFiles, readAllFiles, readFile } from '@/lib/collab/project';
 import { useAnalysis } from '@/lib/editor/useAnalysis';
 import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
@@ -33,8 +33,16 @@ const EditorPane = dynamic(() => import('./EditorPane').then((m) => m.EditorPane
 
 const PROGRAM_FILE = 'main.py';
 
-export function Workspace({ roomId }: { roomId: string }) {
-  const { provider, doc, connected, peers, paths } = useCollab(roomId);
+export function Workspace({
+  roomId,
+  template = null,
+  repo = null,
+}: {
+  roomId: string;
+  template?: string | null;
+  repo?: string | null;
+}) {
+  const { provider, doc, connected, peers, paths } = useCollab(roomId, template);
   const { session, snapshot } = useV5Session();
   const { terminal, output, isOpen, series, clear } = useV5Terminal();
 
@@ -95,6 +103,23 @@ export function Workspace({ roomId }: { roomId: string }) {
   useEffect(() => {
     rememberRoom(roomId);
   }, [roomId]);
+
+  // A room started from a repo clones it once, as soon as the document is up.
+  const clonedRef = useRef(false);
+  useEffect(() => {
+    if (!repo || !doc || clonedRef.current) return;
+    clonedRef.current = true;
+    void fetch('/api/github', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'open', roomId, cloneUrl: repo }),
+    })
+      .then((r) => r.json())
+      .then((result) => {
+        if (Array.isArray(result.files)) applyIncomingFiles(doc, result.files);
+      })
+      .catch(() => undefined);
+  }, [repo, doc, roomId]);
 
   // Copilot is optional and off unless the server was started with it.
   useEffect(() => {

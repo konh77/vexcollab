@@ -17,7 +17,12 @@ On this computer   http://localhost:3000      ← the laptop with the USB cable
 On your Wi-Fi      http://192.168.0.211:3000  ← send this to your team
 ```
 
-Click **Start a room**, share the link, and everyone is typing in the same file.
+Click **Start a room**, pick what it should start with, share the link, and
+everyone is typing in the same file.
+
+**Four templates** — Starter, Blank, Competition (autonomous and driver control,
+split the way a match runs), and Drivetrain (drive in millimetres, turn in
+degrees). Or **start from a GitHub repo** and it clones straight into the room.
 
 > **You need Chrome, Edge or Opera** for the USB parts — Safari and Firefox can't
 > talk to USB devices. Node 20+ to run it. The first launch takes a couple of
@@ -105,7 +110,8 @@ land on the line that broke.
 - Hover anything to see what it is
 - Red underlines for typos and syntax mistakes
 - ⌘K for the command palette, ⌘⇧F to search, ⌘J for the terminal
-- Light or dark, your choice
+- Light or dark, your choice — plus six editor colour schemes and eight
+  monospace fonts, with a live preview in Settings
 
 ---
 

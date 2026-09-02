@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { loadIdentity, saveIdentity } from '@/lib/collab/identity';
 import { loadPrefs, savePrefs, type Prefs } from '@/lib/editor/prefs';
+import { EDITOR_FONTS, EDITOR_THEMES, fontStack } from '@/lib/editor/themes';
 import { TrafficLights } from './TrafficLights';
 
 type ApiResult = Record<string, any>;
@@ -227,6 +228,65 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
               Editor
             </h3>
             <label className="flex items-center justify-between py-1.5 text-sm">
+              <span>Font</span>
+              <select
+                value={prefs.fontFamily}
+                onChange={(event) => {
+                  const fontFamily = event.target.value;
+                  setPrefs({ ...prefs, fontFamily });
+                  savePrefs({ fontFamily });
+                }}
+                className="rounded-md border border-edge bg-shell px-2 py-1 text-sm"
+              >
+                {EDITOR_FONTS.map((font) => (
+                  <option key={font.id} value={font.id}>
+                    {font.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div
+              className="mb-1 rounded-lg border border-edge bg-shell px-3 py-2 text-[13px]"
+              style={{ fontFamily: fontStack(prefs.fontFamily), fontSize: prefs.fontSize }}
+            >
+              left_drive.spin(FORWARD, 50, PERCENT)  # 0123
+            </div>
+            <p className="mb-2 text-[11px] text-ink-dim">
+              System faces only — a webfont would make the editor wait on the network.
+              A font you do not have installed falls back to the next one.
+            </p>
+
+            <label className="flex items-center justify-between py-1.5 text-sm">
+              <span>Colour scheme</span>
+              <select
+                value={prefs.editorTheme}
+                onChange={(event) => {
+                  const editorTheme = event.target.value;
+                  setPrefs({ ...prefs, editorTheme });
+                  savePrefs({ editorTheme });
+                }}
+                className="rounded-md border border-edge bg-shell px-2 py-1 text-sm"
+              >
+                <option value="auto">Match the app</option>
+                <optgroup label="Light">
+                  {EDITOR_THEMES.filter((t) => t.appearance === 'light').map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Dark">
+                  {EDITOR_THEMES.filter((t) => t.appearance === 'dark').map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </label>
+
+            <label className="flex items-center justify-between py-1.5 text-sm">
               <span>Font size</span>
               <span className="flex items-center gap-2">
                 <input
@@ -251,6 +311,7 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
                 ['wordWrap', 'Wrap long lines'],
                 ['minimap', 'Show minimap'],
                 ['lineNumbers', 'Show line numbers'],
+                ['ligatures', 'Font ligatures'],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="flex items-center justify-between py-1.5 text-sm">
