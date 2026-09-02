@@ -40,6 +40,7 @@ export interface BrainSnapshot {
   isCharging: boolean;
   activeProgram: number;
   isRunningProgram: boolean;
+  matchMode: 'driver' | 'autonomous' | 'disabled' | null;
   radio: {
     isAvailable: boolean;
     isConnected: boolean;
@@ -78,6 +79,7 @@ export const EMPTY_SNAPSHOT: BrainSnapshot = {
   isCharging: false,
   activeProgram: 0,
   isRunningProgram: false,
+  matchMode: null,
   radio: { isAvailable: false, isConnected: false, isVexNet: false, channel: null, latency: null },
   devices: [],
   controllers: [],

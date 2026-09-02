@@ -64,6 +64,7 @@ export function BrainPanel({
   const [insecureContext, setInsecureContext] = useState(false);
   const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
   const [firmwareArmed, setFirmwareArmed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
 
   const connected = snapshot.connectionState === 'connected';
@@ -406,6 +407,38 @@ export function BrainPanel({
             </div>
           </Section>
 
+          <Section title="Match control">
+            <p className="mb-2 text-[11px] leading-relaxed text-ink-dim">
+              Drives the competition state machine directly — test autonomous without a
+              field controller or competition switch.
+            </p>
+            <div className="flex gap-1">
+              {(['disabled', 'driver', 'autonomous'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => session.setMatchMode(mode)}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium capitalize transition ${
+                    snapshot.matchMode === mode
+                      ? mode === 'autonomous'
+                        ? 'bg-warn text-shell'
+                        : mode === 'driver'
+                          ? 'bg-ok text-shell'
+                          : 'bg-ink text-shell'
+                      : 'bg-panel hover:bg-edge'
+                  }`}
+                >
+                  {mode === 'autonomous' ? 'Auton' : mode}
+                </button>
+              ))}
+            </div>
+            {snapshot.matchMode === 'autonomous' && (
+              <p className="mt-2 text-[11px] font-medium text-warn">
+                Autonomous is live — the robot may move on its own.
+              </p>
+            )}
+          </Section>
+
           <Section title="Programs on the brain">
             <div className="mb-2 flex gap-2">
               <button
@@ -444,6 +477,28 @@ export function BrainPanel({
                       className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
                     >
                       Run
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${program.name}`}
+                      title={`Delete ${program.name} from slot ${program.slot}`}
+                      onClick={() => {
+                        // Deleting from a brain is not undoable, so make it a
+                        // deliberate act rather than a stray click.
+                        if (confirmDelete === program.binfile) {
+                          void session.deleteProgram(program.binfile);
+                          setConfirmDelete(null);
+                        } else {
+                          setConfirmDelete(program.binfile);
+                        }
+                      }}
+                      className={`rounded-md px-2 py-1 text-xs transition ${
+                        confirmDelete === program.binfile
+                          ? 'bg-vex text-white'
+                          : 'text-ink-dim hover:bg-panel hover:text-vex'
+                      }`}
+                    >
+                      {confirmDelete === program.binfile ? 'Sure?' : '✕'}
                     </button>
                   </li>
                 ))}

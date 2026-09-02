@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { V5Session } from './session';
 import { V5Terminal } from './terminal';
 import { EMPTY_SNAPSHOT, type BrainSnapshot } from './types';
+import { ingest, type Series } from './telemetry';
 
 const SERVER_SNAPSHOT: BrainSnapshot = EMPTY_SNAPSHOT;
 
@@ -30,7 +31,11 @@ export function useV5Terminal() {
   const terminal = useMemo(() => new V5Terminal(), []);
   const [output, setOutput] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const [series, setSeries] = useState<Map<string, Series>>(new Map());
   const pending = useRef('');
+  // Serial arrives in arbitrary chunks; telemetry is per line, so a partial
+  // line is held back until its newline turns up.
+  const partial = useRef('');
 
   useEffect(() => {
     // Batch on animation frames: a chatty program can emit faster than React
@@ -50,6 +55,17 @@ export function useV5Terminal() {
     const offData = terminal.onData((chunk) => {
       pending.current += chunk;
       if (!frame) frame = requestAnimationFrame(flush);
+
+      partial.current += chunk;
+      const lines = partial.current.split('\n');
+      partial.current = lines.pop() ?? '';
+      if (lines.length) {
+        setSeries((current) => {
+          let next = current;
+          for (const line of lines) next = ingest(next, line);
+          return next;
+        });
+      }
     });
     const offState = terminal.onStateChange(setIsOpen);
 
@@ -65,6 +81,10 @@ export function useV5Terminal() {
     terminal,
     output,
     isOpen,
-    clear: () => setOutput(''),
+    series,
+    clear: () => {
+      setOutput('');
+      setSeries(new Map());
+    },
   };
 }

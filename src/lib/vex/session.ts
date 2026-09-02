@@ -147,6 +147,7 @@ export class V5Session {
         isCharging: Boolean(brain.battery.isCharging),
         activeProgram: brain.activeProgram ?? 0,
         isRunningProgram: brain.isRunningProgram,
+        matchMode: (device.matchMode as BrainSnapshot['matchMode']) ?? null,
         radio: {
           isAvailable: Boolean(device.radio.isAvailable),
           isConnected: Boolean(device.radio.isConnected),
@@ -215,6 +216,46 @@ export class V5Session {
       await this.refresh();
     } catch (error) {
       this.fail(error, 'Stopping the program failed');
+    }
+  }
+
+  /**
+   * Drives the competition state machine from here, so autonomous can be
+   * tested without a field controller or a competition switch.
+   */
+  async setMatchMode(mode: 'driver' | 'autonomous' | 'disabled') {
+    const conn = this.device?.connection;
+    if (!conn) return;
+    try {
+      await conn.setMatchMode(mode);
+      this.patch({ matchMode: mode });
+      await this.refresh();
+    } catch (error) {
+      this.fail(error, `Switching to ${mode} failed`);
+    }
+  }
+
+  /** Removes a program from the brain by its binary's filename. */
+  async deleteProgram(binfile: string) {
+    const device = this.device;
+    if (!device?.isConnected) return;
+    try {
+      await device.brain.removeFile(binfile);
+      await this.refreshPrograms();
+    } catch (error) {
+      this.fail(error, `Deleting ${binfile} failed`);
+    }
+  }
+
+  /** Taps the brain's touchscreen, for driving on-screen menus remotely. */
+  async touchScreen(x: number, y: number) {
+    const conn = this.device?.connection;
+    if (!conn) return;
+    try {
+      await conn.mockTouch(x, y, true);
+      await conn.mockTouch(x, y, false);
+    } catch (error) {
+      this.fail(error, 'Screen touch failed');
     }
   }
 

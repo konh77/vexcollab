@@ -34,7 +34,7 @@ const PROGRAM_FILE = 'main.py';
 export function Workspace({ roomId }: { roomId: string }) {
   const { provider, doc, connected, peers, paths } = useCollab(roomId);
   const { session, snapshot } = useV5Session();
-  const { terminal, output, isOpen, clear } = useV5Terminal();
+  const { terminal, output, isOpen, series, clear } = useV5Terminal();
 
   const [active, setActive] = useState(PROGRAM_FILE);
   const [openTabs, setOpenTabs] = useState<string[]>([PROGRAM_FILE]);
@@ -361,7 +361,14 @@ export function Workspace({ roomId }: { roomId: string }) {
 
           {showTerminal && (
             <div className="h-56 shrink-0 border-t border-edge">
-              <TerminalPane terminal={terminal} output={output} isOpen={isOpen} onClear={clear} />
+              <TerminalPane
+                terminal={terminal}
+                output={output}
+                isOpen={isOpen}
+                series={series}
+                onClear={clear}
+                onJump={jumpTo}
+              />
             </div>
           )}
         </main>

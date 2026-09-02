@@ -35,6 +35,14 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 - Upload your program to any slot, run it, stop it
 - Screenshot the brain's screen
 - Live terminal of everything your program prints, and type back to it
+- **Telemetry plots** — any line your program prints shaped like `heading=12.4`
+  becomes a live sparkline. The brain has no debugger, so the print stream *is*
+  the instrumentation
+- **Clickable tracebacks** — when the brain prints a Python traceback, each frame
+  jumps to the line, mapped back through the bundle to the file you wrote
+- **Match control** — flip the brain between disabled / driver / autonomous, so you
+  can test an auton run without a field controller or competition switch
+- Delete programs from slots
 - Update vexOS
 
 **Understands VEX, not just Python**
