@@ -20,6 +20,31 @@ body {
   height: 100%;
 }
 
+/*
+ * Dark theme. Only the tokens change — every component reads through them, so
+ * nothing else needs to know which theme is on.
+ */
+:root[data-theme='dark'] {
+  --color-shell: #1c1c1e;
+  --color-panel: #141416;
+  --color-panel-raised: #242426;
+  --color-edge: rgba(255, 255, 255, 0.1);
+  --color-ink: #f2f2f7;
+  --color-ink-dim: #8e8e93;
+  --color-vex: #ff453a;
+  --color-vex-soft: #ff6961;
+  --color-ok: #30d158;
+  --color-warn: #ffd60a;
+}
+
+:root[data-theme='dark'] .vc-vibrancy {
+  background: rgba(28, 28, 30, 0.72);
+}
+
+:root[data-theme='dark'] .vc-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
 body {
   background: var(--color-shell);
   color: var(--color-ink);

@@ -11,6 +11,7 @@ import { MonacoBinding } from 'y-monaco';
 import type * as Y from 'yjs';
 import type { CollabProvider } from '@/lib/collab/provider';
 import { getFiles } from '@/lib/collab/project';
+import { usePrefs, resolveTheme } from '@/lib/editor/prefs';
 import { registerVexPython } from '@/lib/editor/vex-language';
 import { languageForPath } from '@/lib/vex/program';
 
@@ -76,6 +77,8 @@ export function EditorPane({
   // Monaco loads asynchronously. Refs do not re-trigger effects, so mounting
   // has to flip real state or the language features below never attach.
   const [ready, setReady] = useState(false);
+  const prefs = usePrefs();
+  const theme = resolveTheme(prefs.theme);
 
   useRemoteCursorStyles(provider);
 
@@ -117,7 +120,29 @@ export function EditorPane({
         'editorIndentGuide.background1': '#eeeef0',
       },
     });
-    monaco.editor.setTheme('vexcollab');
+    // One Above/Xcode-style dark to match the app's dark tokens.
+    monaco.editor.defineTheme('vexcollab-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '7F8C98' },
+        { token: 'keyword', foreground: 'FF7AB2' },
+        { token: 'string', foreground: 'FF8170' },
+        { token: 'number', foreground: 'D9C97C' },
+        { token: 'type', foreground: 'DABAFF' },
+        { token: 'type.identifier', foreground: 'DABAFF' },
+        { token: 'identifier', foreground: 'F2F2F7' },
+      ],
+      colors: {
+        'editor.background': '#1c1c1e',
+        'editorGutter.background': '#1c1c1e',
+        'editorLineNumber.foreground': '#48484a',
+        'editorLineNumber.activeForeground': '#8e8e93',
+        'editor.lineHighlightBackground': '#242426',
+        'editor.selectionBackground': '#2f5d8c',
+      },
+    });
+    monaco.editor.setTheme(theme === 'dark' ? 'vexcollab-dark' : 'vexcollab');
 
     editor.onDidChangeCursorPosition((event) =>
       onCursorChange?.({ line: event.position.lineNumber, column: event.position.column }),
@@ -127,6 +152,13 @@ export function EditorPane({
     onEditorReady?.(editor, monaco);
     setReady(true);
   };
+
+  // Theme changes arrive after mount, so re-apply rather than only setting it
+  // when the editor is created.
+  useEffect(() => {
+    if (!ready || !monacoRef.current) return;
+    monacoRef.current.editor.setTheme(theme === 'dark' ? 'vexcollab-dark' : 'vexcollab');
+  }, [theme, ready]);
 
   // Language intelligence is global to Monaco, not per-editor, so it is
   // registered once and disposed when this pane goes away.
@@ -211,10 +243,12 @@ export function EditorPane({
       language={languageForPath(path)}
       onMount={handleMount}
       options={{
-        fontSize: 13,
+        fontSize: prefs.fontSize,
         fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
         fontLigatures: true,
-        minimap: { enabled: true, renderCharacters: false, maxColumn: 80 },
+        wordWrap: prefs.wordWrap ? 'on' : 'off',
+        lineNumbers: prefs.lineNumbers ? 'on' : 'off',
+        minimap: { enabled: prefs.minimap, renderCharacters: false, maxColumn: 80 },
         scrollBeyondLastLine: false,
         smoothScrolling: true,
         cursorSmoothCaretAnimation: 'on',

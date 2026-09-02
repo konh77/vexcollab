@@ -24,6 +24,7 @@ import { openRepo, repoStatus, saveRepo, type RepoFile } from '@/lib/github/git'
 
 const SID = 'vexcollab_sid';
 const CLIENT_ID = process.env.VEXCOLLAB_GITHUB_CLIENT_ID ?? '';
+const CLIENT_SECRET = process.env.VEXCOLLAB_GITHUB_CLIENT_SECRET ?? '';
 
 function readSid(request: Request): string | null {
   const cookie = request.headers.get('cookie') ?? '';
@@ -85,6 +86,8 @@ export async function POST(request: Request) {
           login: session?.login ?? null,
           avatarUrl: session?.avatarUrl ?? null,
           deviceFlowAvailable: Boolean(CLIENT_ID),
+          // Full "Sign in with GitHub" needs an OAuth app with a secret.
+          ssoAvailable: Boolean(CLIENT_ID && CLIENT_SECRET),
         });
 
       case 'signout':

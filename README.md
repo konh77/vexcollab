@@ -45,12 +45,16 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
   not after the program refuses to start on the field
 - **Command palette** (⌘K) for files and actions, editor tabs, status bar,
   minimap, sticky scroll, bracket colouring, hover docs
+- **Light, dark, or follow your system** — the whole app and the editor, applied
+  before first paint so there's no white flash
+- Editor preferences: font size, word wrap, minimap, line numbers
 - ⌘J toggles the terminal. ⌘S does nothing on purpose — everything is already saved
 
 **Ship it**
 - Commit and push the room to a real GitHub repo, or pull your teammate's work in
-- Sign in to GitHub, pick from your repositories (or create one), and load it into
-  the room. *Save session to GitHub* commits and pushes everything back
+- **Sign in with GitHub** (real OAuth), pick from your repositories or create one,
+  and load it into the room. *Save session to GitHub* commits and pushes everything
+  back. No OAuth app? A one-click token link works too
 
 ---
 
@@ -67,6 +71,23 @@ Needs your own **Copilot subscription**. It runs GitHub's official
 `@github/copilot-language-server` — the same server Neovim and Emacs use — as a
 subprocess. VEXCollab never sees or stores your token; the language server owns it.
 Off unless you pass the flag, so nobody spawns a process they didn't ask for.
+
+## Sign in with GitHub (optional)
+
+Without setup, GitHub works via a one-click token link. For a real
+**Sign in with GitHub** button, register an OAuth app once:
+
+1. https://github.com/settings/developers → **New OAuth App**
+2. Homepage URL: `https://your-domain.org`
+3. Authorization callback URL: `https://your-domain.org/api/github/callback`
+4. Put the client id and secret in `/etc/vexcollab.env`:
+
+```
+VEXCOLLAB_GITHUB_CLIENT_ID=Ov23li...
+VEXCOLLAB_GITHUB_CLIENT_SECRET=...
+```
+
+Then `sudo systemctl restart vexcollab`. Tokens are still held in memory only.
 
 ## Add a password
 
@@ -185,7 +206,8 @@ connection, and the Python bundling all happen in each person's browser.
 | `VEXCOLLAB_PASSWORD` | Require a password | none |
 | `VEXCOLLAB_DATA_DIR` | Where room checkouts live | `./.vexcollab-data` |
 | `VEXCOLLAB_TRUST_PROXY` | `1` when behind Caddy/nginx | off |
-| `VEXCOLLAB_GITHUB_CLIENT_ID` | Enables *Sign in with GitHub* | off (token paste still works) |
+| `VEXCOLLAB_GITHUB_CLIENT_ID` | OAuth app id — enables *Sign in with GitHub* | off |
+| `VEXCOLLAB_GITHUB_CLIENT_SECRET` | OAuth app secret — enables the full redirect flow | off |
 | `VEXCOLLAB_HTTPS` | `1` serves TLS, so WebSerial works off-localhost | off |
 | `VEXCOLLAB_COPILOT` | `1` enables GitHub Copilot suggestions | off |
 | `VEXCOLLAB_TOOLCHAIN` | Folder holding `arm-none-eabi-g++` | auto-detected |
