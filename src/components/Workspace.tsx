@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { rememberRoom } from '@/lib/collab/recent';
 import { readAllFiles } from '@/lib/collab/project';
+import { useAnalysis } from '@/lib/editor/useAnalysis';
 import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
@@ -50,6 +51,14 @@ export function Workspace({ roomId }: { roomId: string }) {
     [doc],
   );
 
+  // A cheap signature of the whole project: changes whenever any file's text
+  // does, which is what re-triggers analysis.
+  const projectSignature = doc
+    ? readAllFiles(doc).map((f) => `${f.path}:${f.contents.length}`).join('|')
+    : '';
+  const getAllFiles = useCallback(() => (doc ? readAllFiles(doc) : []), [doc]);
+  const analysis = useAnalysis(getAllFiles, projectSignature);
+
   const programFileCount = countProgramFiles(paths.map((path) => ({ path, contents: '' })));
   const activePath = paths.includes(active) ? active : (paths[0] ?? PROGRAM_FILE);
 
@@ -57,6 +66,9 @@ export function Workspace({ roomId }: { roomId: string }) {
     setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
     setActive(path);
   }, []);
+
+  /** Jumping from a finding or the port map opens the file it lives in. */
+  const jumpTo = useCallback((file: string) => openFile(file), [openFile]);
 
   const closeTab = useCallback(
     (path: string) => {
@@ -218,7 +230,9 @@ export function Workspace({ roomId }: { roomId: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const problems = problemsByPath[activePath] ?? 0;
+  const problems =
+    (problemsByPath[activePath] ?? 0) +
+    analysis.warnings.filter((w) => w.file === activePath).length;
 
   const brainState =
     snapshot.connectionState === 'connected'
@@ -332,6 +346,9 @@ export function Workspace({ roomId }: { roomId: string }) {
               <EditorPane
                 provider={provider}
                 path={activePath}
+                findings={analysis.warnings
+                  .filter((w) => w.file === activePath)
+                  .map((w) => ({ line: w.line, message: w.message, severity: w.severity }))}
                 onCursorChange={setCursor}
                 onProblemsChange={(list: Problem[]) =>
                   setProblemsByPath((prev) => ({ ...prev, [activePath]: list.length }))
@@ -355,6 +372,9 @@ export function Workspace({ roomId }: { roomId: string }) {
             snapshot={snapshot}
             getProgram={getProgram}
             programFileCount={programFileCount}
+            declaredDevices={analysis.devices}
+            findings={analysis.warnings}
+            onJump={jumpTo}
           />
         </aside>
       </div>

@@ -37,6 +37,15 @@ Open the first, hit **Start a room**, send the link. Everyone types at once.
 - Live terminal of everything your program prints, and type back to it
 - Update vexOS
 
+**Understands VEX, not just Python**
+- **Port map** — every device your code declares, side by side with what the brain
+  actually reports. "Your code says PORT7 is a Motor, the brain says port 7 is empty"
+  is behind a huge share of *it worked yesterday*
+- **Checks that matter on a field** — `while True` with no `wait()` (starves the brain
+  until you power-cycle it), two devices on one port, ports outside 1–21, and functions
+  defined in two files that will collide when the upload bundles them
+- Findings appear as squiggles in the editor and as a clickable list beside it
+
 **Edit like an IDE**
 - **VEX API completions** that know your variables — type `left_drive.` and get
   `spin_for`, `set_velocity`, `temperature` with real signatures, because it saw

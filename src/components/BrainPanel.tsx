@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
+import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
+import { PortMap } from './PortMap';
 import { pythonPayload } from '@/lib/vex/program';
 import type { V5Session } from '@/lib/vex/session';
 import type { BrainSnapshot } from '@/lib/vex/types';
@@ -18,6 +20,9 @@ interface Props {
   /** Bundles every .py file in the room into the program to upload. */
   getProgram: () => string;
   programFileCount: number;
+  declaredDevices: DeclaredDevice[];
+  findings: Warning[];
+  onJump: (file: string, line: number) => void;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -41,7 +46,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function BrainPanel({ session, snapshot, getProgram, programFileCount }: Props) {
+export function BrainPanel({
+  session,
+  snapshot,
+  getProgram,
+  programFileCount,
+  declaredDevices,
+  findings,
+  onJump,
+}: Props) {
   const [slot, setSlot] = useState<SlotNumber>(1);
   const [programName, setProgramName] = useState('VEXCollab');
   const [description, setDescription] = useState('Uploaded from the browser');
@@ -209,6 +222,48 @@ export function BrainPanel({ session, snapshot, getProgram, programFileCount }: 
             />
           </div>
         </div>
+      )}
+
+      <Section title="Ports">
+        <PortMap
+          declared={declaredDevices}
+          actual={snapshot.devices}
+          connected={connected}
+          onJump={onJump}
+        />
+        {connected && declaredDevices.length > 0 && (
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
+            Compared against what the brain reports right now.
+          </p>
+        )}
+      </Section>
+
+      {findings.length > 0 && (
+        <Section title={`Checks (${findings.length})`}>
+          <ul className="space-y-1.5">
+            {findings.slice(0, 8).map((finding) => (
+              <li key={`${finding.file}:${finding.line}:${finding.rule}`}>
+                <button
+                  type="button"
+                  onClick={() => onJump(finding.file, finding.line)}
+                  className="flex w-full gap-2 text-left"
+                >
+                  <span
+                    className={`mt-1 size-1.5 shrink-0 rounded-full ${
+                      finding.severity === 'error' ? 'bg-vex' : 'bg-warn'
+                    }`}
+                  />
+                  <span className="flex-1">
+                    <span className="block text-[12px] leading-snug">{finding.message}</span>
+                    <span className="text-[10px] text-ink-dim">
+                      {finding.file}:{finding.line}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Section>
       )}
 
       {connected && (

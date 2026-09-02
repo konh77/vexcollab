@@ -24,6 +24,8 @@ export interface Problem {
 interface Props {
   provider: CollabProvider;
   path: string;
+  /** VEX-specific findings for this file, shown alongside syntax errors. */
+  findings?: { line: number; message: string; severity: 'error' | 'warning' }[];
   onCursorChange?: (position: { line: number; column: number }) => void;
   onProblemsChange?: (problems: Problem[]) => void;
   onEditorReady?: (editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco) => void;
@@ -67,6 +69,7 @@ function useRemoteCursorStyles(provider: CollabProvider) {
 export function EditorPane({
   provider,
   path,
+  findings = [],
   onCursorChange,
   onProblemsChange,
   onEditorReady,
@@ -77,6 +80,9 @@ export function EditorPane({
   // Monaco loads asynchronously. Refs do not re-trigger effects, so mounting
   // has to flip real state or the language features below never attach.
   const [ready, setReady] = useState(false);
+  // Held in a ref so new findings do not restart the lint effect's debounce.
+  const findingsRef = useRef(findings);
+  findingsRef.current = findings;
   const prefs = usePrefs();
   const theme = resolveTheme(prefs.theme);
 
@@ -200,10 +206,8 @@ export function EditorPane({
         });
         const { problems = [] } = (await response.json()) as { problems: Problem[] };
         if (cancelled) return;
-        monaco.editor.setModelMarkers(
-          model,
-          'vexcollab',
-          problems.map((p) => ({
+        monaco.editor.setModelMarkers(model, 'vexcollab', [
+          ...problems.map((p) => ({
             severity: monaco.MarkerSeverity.Error,
             message: p.message,
             startLineNumber: p.line,
@@ -211,7 +215,18 @@ export function EditorPane({
             endLineNumber: p.line,
             endColumn: p.column + 1,
           })),
-        );
+          ...findingsRef.current.map((f) => ({
+            severity:
+              f.severity === 'error'
+                ? monaco.MarkerSeverity.Error
+                : monaco.MarkerSeverity.Warning,
+            message: f.message,
+            startLineNumber: f.line,
+            startColumn: 1,
+            endLineNumber: f.line,
+            endColumn: 1000,
+          })),
+        ]);
         onProblemsChange?.(problems);
       } catch {
         // Linting is a convenience; a failed check must not break editing.
@@ -233,7 +248,7 @@ export function EditorPane({
       listener?.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, ready]);
+  }, [path, ready, findings]);
 
   return (
     <Editor
