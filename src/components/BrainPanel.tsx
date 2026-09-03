@@ -193,8 +193,11 @@ export function BrainPanel({
               `screen          ${snapshot.screen.whiteTheme ? 'light' : 'dark'}${snapshot.screen.reversed ? ' reversed' : ''} lang=${snapshot.screen.language ?? '-'}`,
               `radio           avail=${snapshot.radio.isAvailable} conn=${snapshot.radio.isConnected} vexnet=${snapshot.radio.isVexNet} data=${snapshot.radio.isRadioData} ch=${snapshot.radio.channel ?? '-'} latency=${snapshot.radio.latency ?? '-'}`,
               '',
-              `devices (${snapshot.devices.length})`,
+              `devices (${snapshot.devices.length} shown of ${snapshot.rawDevices.length} reported)`,
               ...snapshot.devices.map((d) => `  port ${d.port}  ${d.type}  v${d.version}`),
+              '',
+              'raw port entries from the brain',
+              ...snapshot.rawDevices.map((d) => `  port ${d.port}  type=${d.type}  v${d.version}`),
               '',
               `controllers (${snapshot.controllers.length})`,
               ...snapshot.controllers.map(

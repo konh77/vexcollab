@@ -205,6 +205,16 @@ export class V5Session {
           channel: device.radio.channel != null ? String(device.radio.channel) : null,
           latency: device.radio.latency ?? null,
         },
+        // Kept unfiltered so "the brain sees nothing" can be told apart from
+        // "we filtered it out" — a distinction that matters when a sensor is
+        // missing and nobody knows whose fault it is.
+        rawDevices: device.devices
+          .filter((d) => d.isAvailable)
+          .map((d) => ({
+            port: d.port ?? 0,
+            type: Number(d.type ?? -1),
+            version: Number(d.version ?? 0),
+          })),
         devices: device.devices
           .filter((d) => d.isAvailable && isRealDevice(d.type, Number(d.version ?? 0)))
           .map((d) => ({

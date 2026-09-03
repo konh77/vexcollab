@@ -60,6 +60,8 @@ export interface BrainSnapshot {
     latency: number | null;
   };
   devices: SmartDeviceView[];
+  /** Every entry the brain reported, before filtering — for diagnosis. */
+  rawDevices: { port: number; type: number; version: number }[];
   controllers: ControllerView[];
   programs: ProgramView[];
   /** Non-null while a file transfer is in flight. */
@@ -103,6 +105,7 @@ export const EMPTY_SNAPSHOT: BrainSnapshot = {
     latency: null,
   },
   devices: [],
+  rawDevices: [],
   controllers: [],
   programs: [],
   transfer: null,
