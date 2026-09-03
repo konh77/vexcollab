@@ -501,9 +501,12 @@ export function BrainPanel({
                   <p className="mt-1.5 leading-relaxed text-ink-dim">
                     A program slot normally holds compiled code under the{' '}
                     <code>USER</code> vendor, which is why source is rejected. The protocol
-                    also defines a <code>VEXVM</code> vendor (64) — a plausible home for
-                    programs the brain&apos;s on-board Python VM runs. Nobody has documented
-                    this; trying it is how we find out.
+                    also defines a <code>VEXVM</code> vendor (64).{' '}
+                    <span className="font-medium text-ink">
+                      Tested on vexOS 1.1.5: the brain refuses the write outright.
+                    </span>{' '}
+                    Left here so the result is recorded rather than retried — Python needs
+                    more than a different vendor.
                   </p>
                   <div className="mt-2 flex gap-1">
                     {(['user', 'vexvm'] as const).map((option) => (

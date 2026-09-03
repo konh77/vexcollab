@@ -203,12 +203,13 @@ on a proven, independent implementation of VEX's USB protocol, so it isn't
 guesswork — but the first upload deserves a robot you don't mind power-cycling.
 Two things to watch:
 
-1. **Uploading Python does not work yet — confirmed on hardware.** A V5 program
-   slot holds compiled code, and vexOS 1.1.5 rejects uploaded Python source as an
-   *invalid user program*. How VEXcode packages Python for the brain's on-board VM
-   is not publicly documented. **Build in VEXcode and upload the `.bin` it
-   produces** — that path works, and the upload panel asks for it directly.
-   Everything else about the editor is unaffected.
+1. **Uploading Python does not work — confirmed on hardware, twice.** A V5
+   program slot holds compiled code, and vexOS 1.1.5 rejects uploaded source as
+   an *invalid user program*. Writing it under the protocol's `VEXVM` vendor
+   instead was also tried, and the brain refuses that write outright. How VEXcode
+   packages Python for the on-board VM is not publicly documented and needs more
+   than a vendor change. **Build in VEXcode and upload the `.bin` it produces** —
+   that path works, and the upload panel asks for it directly.
 2. **Screen capture does not work — confirmed on vexOS 1.1.5.** The brain
    acknowledges the capture command but never answers the read that follows, so
    no image comes back. Probed directly over USB, not just through the app.

@@ -46,14 +46,21 @@ function formatVersion(value: unknown): string | null {
 }
 
 /**
+ * vexOS reports type 129 with version 0 for a smart port with nothing in it.
+ * The value is absent from the protocol's enum, and it was confirmed by
+ * reading a brain with all twenty ports empty: every one came back as 129.
+ */
+const EMPTY_PORT_TYPE = 129;
+
+/**
  * A V5 reports an entry for every smart port whether or not anything is
- * plugged in. On real hardware the empty ones came back as type 129 with
- * version 0 — a value absent from the protocol's enum — so twenty empty ports
- * were being listed as devices. Anything unrecognised *with* a version is kept,
- * so a genuinely new sensor still shows up rather than being hidden.
+ * plugged in, so the empty ones have to be recognised or twenty phantom
+ * devices appear. Anything unrecognised *with* a version is still kept, so a
+ * sensor newer than the protocol's enum shows up rather than being hidden.
  */
 function isRealDevice(type: SmartDeviceType | undefined, version: number): boolean {
   if (type === undefined) return false;
+  if (type === EMPTY_PORT_TYPE && version === 0) return false;
   if (type === SmartDeviceType.EMPTY || type === SmartDeviceType.UNDEFINED_SENSOR) return false;
   const known = SmartDeviceType[type] !== undefined;
   return known || version > 0;
