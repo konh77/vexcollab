@@ -733,7 +733,7 @@ function EditableValue({
         onClick={() => setDraft(value ?? '')}
         className="underline decoration-dotted underline-offset-2 hover:text-vex-soft"
       >
-        {value || 'set'}
+        {value || <span className="text-ink-dim">Not set</span>}
       </button>
     );
   }

@@ -20,7 +20,7 @@ import { V5SerialDevice } from '@/lib/v5-serial-protocol/VexDevice';
 import { ProgramIniConfig } from '@/lib/v5-serial-protocol/VexIniConfig';
 import { ScreenCaptureH2DPacket } from '@/lib/v5-serial-protocol/VexPacket';
 import { EMPTY_SNAPSHOT, type BrainFile, type BrainSnapshot, type UploadRequest } from './types';
-import { decodeScreenCapture, SCREEN_CAPTURE_BYTES } from './screen';
+import { decodeScreenCapture, SCREEN_CAPTURE_BYTES, SCREEN_WIDTH } from './screen';
 
 const VEX_USB_VENDOR_ID = 0x2888;
 
@@ -163,8 +163,9 @@ export class V5Session {
 
       this.patch({
         isV5Controller: device.isV5Controller,
-        brainName: brainName ? String(brainName) : null,
-        teamNumber: teamNumber ? String(teamNumber) : null,
+        // An empty read is not proof the value is unset — keep what we have.
+        brainName: brainName ? String(brainName) : this.snapshot.brainName,
+        teamNumber: teamNumber ? String(teamNumber) : this.snapshot.teamNumber,
         uniqueId: brain.uniqueId ?? null,
         systemVersion: formatVersion(brain.systemVersion),
         cpu0Version: formatVersion(brain.cpu0Version),
@@ -417,11 +418,24 @@ export class V5Session {
     this.patch({ transfer: { label: 'Screen', current: 0, total: SCREEN_CAPTURE_BYTES }, lastError: null });
     try {
       await conn.writeDataAsync(new ScreenCaptureH2DPacket(0));
+
+      // The brain copies the framebuffer into its capture buffer after
+      // acknowledging the command, not before. Reading immediately raced that
+      // copy and came back as a failed ReadFileReply on real hardware.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // Let the brain declare the size in its init reply rather than asserting
+      // 512x272x4 — if this firmware disagrees, the read walks off the end.
       const raw = await conn.downloadFileToHost(
-        { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0, size: SCREEN_CAPTURE_BYTES },
+        { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0 },
         FileDownloadTarget.FILE_TARGET_CBUF,
         (current, total) => this.patch({ transfer: { label: 'Screen', current, total } }),
       );
+
+      if (!raw || raw.length < SCREEN_WIDTH * 4) {
+        this.patch({ lastError: `Screen capture returned only ${raw?.length ?? 0} bytes` });
+        return null;
+      }
       return decodeScreenCapture(raw);
     } catch (error) {
       this.fail(error, 'Screen capture failed');
@@ -436,6 +450,9 @@ export class V5Session {
   async setBrainName(name: string) {
     try {
       await this.device?.brain.setValue('robotname', name);
+      // Show it straight away: the brain sometimes needs a moment before
+      // reading the value back returns the new one.
+      this.patch({ brainName: name });
       await this.refresh();
     } catch (error) {
       this.fail(error, 'Setting brain name failed');
@@ -445,6 +462,7 @@ export class V5Session {
   async setTeamNumber(team: string) {
     try {
       await this.device?.brain.setValue('teamnumber', team);
+      this.patch({ teamNumber: team });
       await this.refresh();
     } catch (error) {
       this.fail(error, 'Setting team number failed');
