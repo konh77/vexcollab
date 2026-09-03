@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
 import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
 import { PortMap } from './PortMap';
+import { firmwareState } from '@/lib/vex/firmware';
 import { pythonPayload } from '@/lib/vex/program';
 import type { V5Session } from '@/lib/vex/session';
 import type { BrainFile, BrainSnapshot } from '@/lib/vex/types';
@@ -642,52 +643,74 @@ export function BrainPanel({
           </Section>
 
           <Section title="Firmware">
-            <Row label="Installed" value={snapshot.systemVersion} />
-            <Row label="Latest from VEX" value={latestFirmware ?? 'checking…'} />
+            {(() => {
+              const fw = firmwareState(snapshot.systemVersion, latestFirmware);
+              return (
+                <>
+                  <Row label="Installed" value={fw.installed?.display ?? snapshot.systemVersion} />
+                  <Row
+                    label="Latest from VEX"
+                    value={fw.latest?.display ?? (latestFirmware ? latestFirmware : 'checking…')}
+                  />
 
-            {latestFirmware && snapshot.systemVersion === latestFirmware ? (
-              <p className="mt-2 text-xs text-ink-dim">Already on the current vexOS.</p>
-            ) : (
-              <>
-                <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                  Flashing rewrites the brain's boot image.{' '}
-                  <span className="font-medium text-ink">
-                    Do not unplug or close this tab while it runs
-                  </span>{' '}
-                  — an interrupted flash can leave the brain unbootable. Use a charged
-                  battery and a data cable, and quit any other VEX software first.
-                </p>
+                  {fw.state === 'current' && (
+                    <p className="mt-2 text-xs text-ok">Already on the current vexOS.</p>
+                  )}
+                  {fw.state === 'ahead' && (
+                    <p className="mt-2 text-xs text-ink-dim">
+                      This brain is newer than the published release. Nothing to do.
+                    </p>
+                  )}
+                  {fw.state === 'unknown' && (
+                    <p className="mt-2 text-xs text-ink-dim">
+                      Could not read both versions, so no update is offered.
+                    </p>
+                  )}
 
-                {firmwareArmed ? (
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={updateFirmware}
-                      disabled={busy || Boolean(snapshot.transfer)}
-                      className="flex-1 rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
-                    >
-                      Yes, flash {latestFirmware}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFirmwareArmed(false)}
-                      className="rounded-lg bg-panel px-3 py-2 text-sm transition hover:bg-edge"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setFirmwareArmed(true)}
-                    disabled={busy || !latestFirmware || Boolean(snapshot.transfer)}
-                    className="mt-2 w-full rounded-lg border border-edge bg-panel-raised px-3 py-2 text-sm font-medium transition hover:bg-panel disabled:opacity-50"
-                  >
-                    Update vexOS{latestFirmware ? ` to ${latestFirmware}` : ''}
-                  </button>
-                )}
-              </>
-            )}
+                  {fw.state === 'update-available' && (
+                    <>
+                      <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                        Flashing rewrites the brain&apos;s boot image.{' '}
+                        <span className="font-medium text-ink">
+                          Do not unplug or close this tab while it runs
+                        </span>{' '}
+                        — an interrupted flash can leave the brain unbootable. Use a charged
+                        battery and a data cable, and quit any other VEX software first.
+                      </p>
+
+                      {firmwareArmed ? (
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={updateFirmware}
+                            disabled={busy || Boolean(snapshot.transfer)}
+                            className="flex-1 rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
+                          >
+                            Yes, flash {fw.latest?.display}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFirmwareArmed(false)}
+                            className="rounded-lg bg-panel px-3 py-2 text-sm transition hover:bg-edge"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setFirmwareArmed(true)}
+                          disabled={busy || Boolean(snapshot.transfer)}
+                          className="mt-2 w-full rounded-lg border border-edge bg-panel-raised px-3 py-2 text-sm font-medium transition hover:bg-panel disabled:opacity-50"
+                        >
+                          Update vexOS to {fw.latest?.display}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </Section>
 
           <Section title="Brain screen">
