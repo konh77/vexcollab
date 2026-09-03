@@ -454,14 +454,24 @@ export class V5Session {
         { label: 'framebuffer size', size: SCREEN_CAPTURE_BYTES },
       ];
 
+      // On vexOS 1.1.5 the capture-buffer read can never reply at all, which
+      // hangs rather than fails. Bound it so the UI always comes back.
+      const withDeadline = <T,>(work: Promise<T>, ms: number): Promise<T> =>
+        Promise.race([
+          work,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`no reply within ${ms / 1000}s`)), ms),
+          ),
+        ]);
+
       const failures: string[] = [];
       for (const attempt of attempts) {
         try {
-          const raw = await conn.downloadFileToHost(
+          const raw = await withDeadline(conn.downloadFileToHost(
             { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0, size: attempt.size },
             FileDownloadTarget.FILE_TARGET_CBUF,
             (current, total) => this.patch({ transfer: { label: 'Screen', current, total } }),
-          );
+          ), 15000);
           if (raw && raw.length >= SCREEN_WIDTH * 4) return decodeScreenCapture(raw);
           failures.push(`${attempt.label}: ${raw?.length ?? 0} bytes`);
         } catch (error) {
@@ -470,7 +480,9 @@ export class V5Session {
       }
 
       this.patch({
-        lastError: `Screen capture did not return an image (${failures.join('; ')})`,
+        lastError:
+          `Screen capture is not working on this brain (${failures.join('; ')}). ` +
+          `vexOS 1.1.5 does not answer the capture-buffer read this build uses.`,
       });
       return null;
     } catch (error) {

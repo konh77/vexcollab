@@ -209,8 +209,10 @@ Two things to watch:
    is not publicly documented. **Build in VEXcode and upload the `.bin` it
    produces** — that path works, and the upload panel asks for it directly.
    Everything else about the editor is unaffected.
-2. **Screen colours.** If a screenshot of the brain comes out with red and blue
-   swapped, that's one line in `src/lib/vex/screen.ts`.
+2. **Screen capture does not work — confirmed on vexOS 1.1.5.** The brain
+   acknowledges the capture command but never answers the read that follows, so
+   no image comes back. Probed directly over USB, not just through the app.
+   Everything else on the brain panel works.
 
 Found something on real hardware? Please open an issue — that's exactly the gap.
 
