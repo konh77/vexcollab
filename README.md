@@ -203,9 +203,12 @@ on a proven, independent implementation of VEX's USB protocol, so it isn't
 guesswork — but the first upload deserves a robot you don't mind power-cycling.
 Two things to watch:
 
-1. **Uploading Python.** VEX doesn't publish exactly how they package Python
-   programs. If your brain rejects the upload, *Runtime image (advanced)* lets you
-   point at the one from your own VEXcode install.
+1. **Uploading Python does not work yet — confirmed on hardware.** A V5 program
+   slot holds compiled code, and vexOS 1.1.5 rejects uploaded Python source as an
+   *invalid user program*. How VEXcode packages Python for the brain's on-board VM
+   is not publicly documented. **Build in VEXcode and upload the `.bin` it
+   produces** — that path works, and the upload panel asks for it directly.
+   Everything else about the editor is unaffected.
 2. **Screen colours.** If a screenshot of the brain comes out with red and blue
    swapped, that's one line in `src/lib/vex/screen.ts`.
 
