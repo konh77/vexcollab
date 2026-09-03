@@ -60,7 +60,7 @@ const EMPTY_PORT_TYPE = 129;
  */
 function isRealDevice(type: SmartDeviceType | undefined, version: number): boolean {
   if (type === undefined) return false;
-  if (type === EMPTY_PORT_TYPE && version === 0) return false;
+  if ((type as number) === EMPTY_PORT_TYPE && version === 0) return false;
   if (type === SmartDeviceType.EMPTY || type === SmartDeviceType.UNDEFINED_SENSOR) return false;
   const known = SmartDeviceType[type] !== undefined;
   return known || version > 0;
