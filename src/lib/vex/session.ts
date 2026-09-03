@@ -25,6 +25,15 @@ import { decodeScreenCapture, SCREEN_CAPTURE_BYTES, SCREEN_WIDTH } from './scree
 const VEX_USB_VENDOR_ID = 0x2888;
 
 /**
+ * The brain's key/value store is the one part of the protocol the vendored
+ * library marks "UNSURE", and on real hardware `robotname` reads back while
+ * `teamnumber` returns empty. Rather than guess a single name, try the
+ * plausible ones and use whichever actually answers.
+ */
+const TEAM_KEYS = ['teamnumber', 'teamnum', 'team_number', 'team'];
+const NAME_KEYS = ['robotname', 'robot_name', 'name'];
+
+/**
  * VexFirmwareVersion is a class, so String() on it yields "[object Object]".
  * Real hardware caught this: the panel showed that for vexOS and both CPUs.
  */
@@ -67,6 +76,8 @@ export class V5Session {
   private listeners = new Set<() => void>();
   private snapshot: BrainSnapshot = EMPTY_SNAPSHOT;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Which key name actually worked, per logical field. */
+  private workingKeys = new Map<string, string>();
 
   static isSupported(): boolean {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
@@ -157,8 +168,8 @@ export class V5Session {
       const brain = device.brain;
 
       const [brainName, teamNumber] = await Promise.all([
-        brain.getValue('robotname').catch(() => null),
-        brain.getValue('teamnumber').catch(() => null),
+        this.readFirst(NAME_KEYS),
+        this.readFirst(TEAM_KEYS),
       ]);
 
       this.patch({
@@ -251,6 +262,18 @@ export class V5Session {
       this.fail(error, 'Listing files failed');
       return [];
     }
+  }
+
+  /** Returns the first key that yields a non-empty value, and remembers it. */
+  private async readFirst(keys: string[]): Promise<string | null> {
+    for (const key of keys) {
+      const value = await this.readValue(key);
+      if (value && value.trim()) {
+        this.workingKeys.set(keys[0], key);
+        return value.trim();
+      }
+    }
+    return null;
   }
 
   /** Arbitrary key/value read off the brain — useful for poking at settings. */
@@ -424,19 +447,32 @@ export class V5Session {
       // copy and came back as a failed ReadFileReply on real hardware.
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // Let the brain declare the size in its init reply rather than asserting
-      // 512x272x4 — if this firmware disagrees, the read walks off the end.
-      const raw = await conn.downloadFileToHost(
-        { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0 },
-        FileDownloadTarget.FILE_TARGET_CBUF,
-        (current, total) => this.patch({ transfer: { label: 'Screen', current, total } }),
-      );
+      // Ask the brain for the size first. On vexOS 1.1.5 it answers 0, so fall
+      // back to the framebuffer's known geometry rather than giving up.
+      const attempts: { label: string; size?: number }[] = [
+        { label: 'reported size' },
+        { label: 'framebuffer size', size: SCREEN_CAPTURE_BYTES },
+      ];
 
-      if (!raw || raw.length < SCREEN_WIDTH * 4) {
-        this.patch({ lastError: `Screen capture returned only ${raw?.length ?? 0} bytes` });
-        return null;
+      const failures: string[] = [];
+      for (const attempt of attempts) {
+        try {
+          const raw = await conn.downloadFileToHost(
+            { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0, size: attempt.size },
+            FileDownloadTarget.FILE_TARGET_CBUF,
+            (current, total) => this.patch({ transfer: { label: 'Screen', current, total } }),
+          );
+          if (raw && raw.length >= SCREEN_WIDTH * 4) return decodeScreenCapture(raw);
+          failures.push(`${attempt.label}: ${raw?.length ?? 0} bytes`);
+        } catch (error) {
+          failures.push(`${attempt.label}: ${(error as Error).message}`);
+        }
       }
-      return decodeScreenCapture(raw);
+
+      this.patch({
+        lastError: `Screen capture did not return an image (${failures.join('; ')})`,
+      });
+      return null;
     } catch (error) {
       this.fail(error, 'Screen capture failed');
       return null;
@@ -449,7 +485,8 @@ export class V5Session {
 
   async setBrainName(name: string) {
     try {
-      await this.device?.brain.setValue('robotname', name);
+      const key = this.workingKeys.get(NAME_KEYS[0]) ?? NAME_KEYS[0];
+      await this.device?.brain.setValue(key, name);
       // Show it straight away: the brain sometimes needs a moment before
       // reading the value back returns the new one.
       this.patch({ brainName: name });
@@ -459,10 +496,25 @@ export class V5Session {
     }
   }
 
+  /**
+   * Writes the team number, then reads it back to prove it stuck. On this
+   * firmware a write to the wrong key succeeds silently and changes nothing,
+   * which is worse than an error — so verify rather than assume.
+   */
   async setTeamNumber(team: string) {
     try {
-      await this.device?.brain.setValue('teamnumber', team);
+      const key = this.workingKeys.get(TEAM_KEYS[0]) ?? TEAM_KEYS[0];
+      await this.device?.brain.setValue(key, team);
       this.patch({ teamNumber: team });
+
+      const readBack = await this.readFirst(TEAM_KEYS);
+      if (!readBack) {
+        this.patch({
+          lastError:
+            `The brain accepted the team number but reports it as empty. ` +
+            `Tried keys: ${TEAM_KEYS.join(', ')}. It may only be settable from the brain's own menu.`,
+        });
+      }
       await this.refresh();
     } catch (error) {
       this.fail(error, 'Setting team number failed');
