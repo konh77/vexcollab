@@ -229,6 +229,131 @@ main()
   },
 ];
 
+
+const VISION_MAIN = [
+  'from vex import *',
+  '',
+  'brain = Brain()',
+  '',
+  '# Set your signature numbers in the VEX Vision Utility, then paste them here.',
+  '# The nine values are: index, uMin, uMax, uMean, vMin, vMax, vMean, range, type',
+  'SIG_BLUE = Signature(1, -3000, -2000, -2500, 5000, 8000, 6500, 3.0, 0)',
+  '',
+  'vision = Vision(Ports.PORT11, 50, SIG_BLUE)',
+  '',
+  '',
+  'def main():',
+  '    while True:',
+  '        objects = vision.take_snapshot(SIG_BLUE)',
+  '',
+  '        if objects and vision.object_count > 0:',
+  '            target = vision.largest_object()',
+  '            # Printed like this, VEXCollab charts each value live.',
+  '            print("seen=1 cx=%d cy=%d w=%d h=%d" % (',
+  '                target.centerX, target.centerY, target.width, target.height))',
+  '        else:',
+  '            print("seen=0 cx=0 cy=0 w=0 h=0")',
+  '',
+  '        wait(100, MSEC)',
+  '',
+  '',
+  'main()',
+  '',
+].join('\n');
+
+const VISION_README = [
+  '# Vision sensor',
+  '',
+  "Configure the signature in VEX's Vision Utility first, then copy the nine",
+  'numbers into SIG_BLUE at the top of main.py.',
+  '',
+  'The sensor is on PORT11. Change it if yours differs.',
+  '',
+  'Open the user port in the terminal panel and the printed values are charted',
+  'live. cx tells you whether the object is left or right of centre: the frame',
+  'is 0 to 315 wide, so 158 is the middle.',
+  '',
+].join('\n');
+
+const GPS_MAIN = [
+  'from vex import *',
+  '',
+  'brain = Brain()',
+  '',
+  "# Fourth argument is where the sensor sits relative to the robot's centre.",
+  'gps = Gps(Ports.PORT1, 0, 0, MM, 180)',
+  '',
+  '',
+  'def main():',
+  '    gps.calibrate()',
+  '    while gps.is_calibrating():',
+  '        wait(50, MSEC)',
+  '    brain.screen.print("GPS ready")',
+  '',
+  '    while True:',
+  '        # x, y and heading on one line: VEXCollab pairs them up and draws',
+  '        # the robot on a top-down field view.',
+  '        print("x=%d y=%d heading=%d quality=%d" % (',
+  '            gps.x_position(MM),',
+  '            gps.y_position(MM),',
+  '            gps.heading(DEGREES),',
+  '            gps.quality()))',
+  '',
+  '        wait(100, MSEC)',
+  '',
+  '',
+  'main()',
+  '',
+].join('\n');
+
+const GPS_README = [
+  '# GPS sensor',
+  '',
+  'Prints field position every 100 ms. Open the user port in the terminal panel',
+  'and the field map in the Brain rail draws where the robot is, with a trail',
+  'behind it.',
+  '',
+  'The field is 3.6 m square and the GPS reports millimetres from the centre, so',
+  'values run about -1800 to 1800 on each axis.',
+  '',
+  'Watch quality. Below about 90 the sensor cannot see enough of the wall strips',
+  'and the position should not be trusted.',
+  '',
+].join('\n');
+
+TEMPLATES.push(
+  {
+    id: 'vision',
+    name: 'Vision sensor',
+    description: 'Track a colour signature and print what it sees.',
+    files: [
+      {
+        path: 'main.py',
+        contents: VISION_MAIN,
+      },
+      {
+        path: 'README.md',
+        contents: VISION_README,
+      },
+    ],
+  },
+  {
+    id: 'gps',
+    name: 'GPS sensor',
+    description: 'Print field position — VEXCollab draws it on a field map.',
+    files: [
+      {
+        path: 'main.py',
+        contents: GPS_MAIN,
+      },
+      {
+        path: 'README.md',
+        contents: GPS_README,
+      },
+    ],
+  },
+);
+
 export function templateById(id: string | null | undefined): Template {
   return TEMPLATES.find((t) => t.id === id) ?? TEMPLATES[0];
 }

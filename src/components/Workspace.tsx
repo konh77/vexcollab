@@ -451,6 +451,7 @@ export function Workspace({
             programFileCount={programFileCount}
             declaredDevices={analysis.devices}
             findings={analysis.warnings}
+            telemetry={series}
             onJump={jumpTo}
           />
           </div>

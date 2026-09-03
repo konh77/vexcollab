@@ -125,6 +125,139 @@ const MOTOR_MEMBERS: ApiMember[] = [
   { name: 'is_done', signature: 'is_done() -> bool', detail: 'True when the last blocking move finished.', snippet: 'is_done()' },
 ];
 
+
+const SENSOR_CALIBRATE: ApiMember[] = [
+  { name: 'calibrate', signature: 'calibrate()', detail: 'Start calibration. Wait for it before using readings.', snippet: 'calibrate()' },
+  { name: 'is_calibrating', signature: 'is_calibrating() -> bool', detail: 'True while calibrating.', snippet: 'is_calibrating()' },
+  { name: 'installed', signature: 'installed() -> bool', detail: 'True when the sensor is actually plugged in.', snippet: 'installed()' },
+];
+
+export const SENSOR_CLASSES: ApiClass[] = [
+  {
+    name: 'Vision',
+    detail: 'Vision sensor. Configure signatures in the VEX Vision Utility first.',
+    constructor: 'Vision(${1:Ports.PORT11}, ${2:50}, ${3:SIG_1})',
+    constructorParams: [{ name: 'port', kind: 'port' }, { name: 'brightness', kind: 'number', optional: true }],
+    members: [
+      { name: 'take_snapshot', signature: 'take_snapshot(signature, count=1) -> tuple', detail: 'Look now. Returns the objects seen, largest first.', snippet: 'take_snapshot(${1:SIG_1})' },
+      { name: 'objects', signature: 'vision.objects', detail: 'Objects from the last snapshot.' },
+      { name: 'object_count', signature: 'vision.object_count -> int', detail: 'How many objects the last snapshot found.' },
+      { name: 'largest_object', signature: 'largest_object() -> VisionObject', detail: 'The biggest object from the last snapshot.', snippet: 'largest_object()' },
+      { name: 'set_brightness', signature: 'set_brightness(percent)', detail: 'Camera brightness, 0..100.', snippet: 'set_brightness(${1:50})' },
+      { name: 'set_signature', signature: 'set_signature(signature)', detail: 'Replace a stored signature.', snippet: 'set_signature(${1:SIG_1})' },
+    ],
+  },
+  {
+    name: 'Signature',
+    detail: 'A colour signature. Copy these numbers out of the VEX Vision Utility.',
+    constructor: 'Signature(${1:1}, ${2:0}, ${3:0}, ${4:0}, ${5:0}, ${6:0}, ${7:0}, ${8:3.0}, ${9:0})',
+    members: [],
+  },
+  {
+    name: 'Gps',
+    detail: 'GPS sensor. Reports field position from the wall QR strips.',
+    constructor: 'Gps(${1:Ports.PORT1}, ${2:0}, ${3:0}, ${4:MM}, ${5:180})',
+    constructorParams: [{ name: 'port', kind: 'port' }, { name: 'origin_x', kind: 'number', optional: true }, { name: 'origin_y', kind: 'number', optional: true }, { name: 'units', kind: 'distanceUnit', optional: true }, { name: 'angle', kind: 'number', optional: true }],
+    members: [
+      ...SENSOR_CALIBRATE,
+      { name: 'x_position', signature: 'x_position(units) -> float', detail: 'Field X. Origin is the field centre.', snippet: 'x_position(${1:MM})', params: [{ name: 'units', kind: 'distanceUnit' }] },
+      { name: 'y_position', signature: 'y_position(units) -> float', detail: 'Field Y.', snippet: 'y_position(${1:MM})', params: [{ name: 'units', kind: 'distanceUnit' }] },
+      { name: 'heading', signature: 'heading(units) -> float', detail: 'Field heading 0..360.', snippet: 'heading(${1:DEGREES})', params: [{ name: 'units', kind: 'rotationUnit' }] },
+      { name: 'rotation', signature: 'rotation(units) -> float', detail: 'Cumulative rotation, unbounded.', snippet: 'rotation(${1:DEGREES})' },
+      { name: 'quality', signature: 'quality() -> int', detail: 'Confidence 0..100. Below ~90 do not trust the position.', snippet: 'quality()' },
+      { name: 'set_origin', signature: 'set_origin(x, y, units)', detail: 'Where the sensor sits relative to the robot centre.', snippet: 'set_origin(${1:0}, ${2:0}, ${3:MM})' },
+      { name: 'set_location', signature: 'set_location(x, y, units, heading, rotation_units)', detail: 'Tell the sensor where the robot actually is.', snippet: 'set_location(${1:0}, ${2:0}, ${3:MM}, ${4:0}, ${5:DEGREES})' },
+    ],
+  },
+  {
+    name: 'Sonar',
+    detail: 'Ultrasonic range finder on two adjacent 3-wire ports.',
+    constructor: 'Sonar(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'distance', signature: 'distance(units) -> float', detail: 'Distance to whatever is in front.', snippet: 'distance(${1:MM})', params: [{ name: 'units', kind: 'distanceUnit' }] },
+      { name: 'found', signature: 'found() -> bool', detail: 'True when an echo came back.', snippet: 'found()' },
+    ],
+  },
+  {
+    name: 'Bumper',
+    detail: 'Bumper switch on a 3-wire port.',
+    constructor: 'Bumper(${1:brain.three_wire_port.a})',
+    members: [{ name: 'pressing', signature: 'pressing() -> bool', detail: 'True while pressed.', snippet: 'pressing()' }],
+  },
+  {
+    name: 'Limit',
+    detail: 'Limit switch on a 3-wire port.',
+    constructor: 'Limit(${1:brain.three_wire_port.a})',
+    members: [{ name: 'pressing', signature: 'pressing() -> bool', detail: 'True while pressed.', snippet: 'pressing()' }],
+  },
+  {
+    name: 'Encoder',
+    detail: 'Quadrature encoder on two adjacent 3-wire ports.',
+    constructor: 'Encoder(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'position', signature: 'position(units) -> float', detail: 'Counted position.', snippet: 'position(${1:DEGREES})' },
+      { name: 'velocity', signature: 'velocity(units) -> float', detail: 'Rotational velocity.', snippet: 'velocity(${1:RPM})' },
+      { name: 'reset_position', signature: 'reset_position()', detail: 'Zero the count.', snippet: 'reset_position()' },
+    ],
+  },
+  {
+    name: 'Potentiometer',
+    detail: 'Rotary potentiometer on a 3-wire port.',
+    constructor: 'Potentiometer(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'angle', signature: 'angle(units) -> float', detail: 'Shaft angle.', snippet: 'angle(${1:DEGREES})' },
+      { name: 'value', signature: 'value(units) -> int', detail: 'Raw reading.', snippet: 'value(PERCENT)' },
+    ],
+  },
+  {
+    name: 'Line',
+    detail: 'Line tracker on a 3-wire port.',
+    constructor: 'Line(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'reflectivity', signature: 'reflectivity(units) -> float', detail: 'How much light comes back, 0..100.', snippet: 'reflectivity(PERCENT)' },
+      { name: 'value', signature: 'value(units) -> int', detail: 'Raw reading.', snippet: 'value(PERCENT)' },
+    ],
+  },
+  {
+    name: 'Light',
+    detail: 'Ambient light sensor on a 3-wire port.',
+    constructor: 'Light(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'brightness', signature: 'brightness(units) -> float', detail: 'Brightness 0..100.', snippet: 'brightness(PERCENT)' },
+      { name: 'value', signature: 'value(units) -> int', detail: 'Raw reading.', snippet: 'value(PERCENT)' },
+    ],
+  },
+  {
+    name: 'Servo',
+    detail: 'Hobby servo on a 3-wire port.',
+    constructor: 'Servo(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'set_position', signature: 'set_position(value, units)', detail: 'Move to an angle.', snippet: 'set_position(${1:0}, ${2:DEGREES})' },
+      { name: 'position', signature: 'position(units) -> float', detail: 'Where it currently is.', snippet: 'position(${1:DEGREES})' },
+    ],
+  },
+  {
+    name: 'Electromagnet',
+    detail: 'Electromagnet. Pick things up and drop them.',
+    constructor: 'Electromagnet(${1:Ports.PORT1})',
+    constructorParams: [{ name: 'port', kind: 'port' }],
+    members: [
+      { name: 'pickup', signature: 'pickup(power)', detail: 'Energise to grab.', snippet: 'pickup(${1:50})' },
+      { name: 'drop', signature: 'drop(power)', detail: 'Reverse to release.', snippet: 'drop(${1:50})' },
+      { name: 'set_power', signature: 'set_power(power)', detail: 'Default strength 0..100.', snippet: 'set_power(${1:50})' },
+    ],
+  },
+  {
+    name: 'AddressableLed',
+    detail: 'Addressable LED strip on a 3-wire port.',
+    constructor: 'AddressableLed(${1:brain.three_wire_port.a})',
+    members: [
+      { name: 'set', signature: 'set(colours, offset=0)', detail: 'Write a list of colours to the strip.', snippet: 'set([${1:Color.RED}])' },
+      { name: 'clear', signature: 'clear()', detail: 'All off.', snippet: 'clear()' },
+    ],
+  },
+];
+
 export const API_CLASSES: ApiClass[] = [
   {
     name: 'Brain',
@@ -242,6 +375,7 @@ export const API_CLASSES: ApiClass[] = [
       { name: 'close', signature: 'close()', detail: 'Retract.', snippet: 'close()' },
     ],
   },
+  ...SENSOR_CLASSES,
 ];
 
 /** Free functions available after `from vex import *`. */
