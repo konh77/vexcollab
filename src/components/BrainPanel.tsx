@@ -67,6 +67,7 @@ export function BrainPanel({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [brainFiles, setBrainFiles] = useState<BrainFile[]>([]);
   const [filesLoaded, setFilesLoaded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
 
   const connected = snapshot.connectionState === 'connected';
@@ -158,6 +159,57 @@ export function BrainPanel({
 
   return (
     <div className="vc-scroll flex h-full flex-col gap-3 overflow-y-auto bg-panel p-2.5">
+      {connected && (
+        <button
+          type="button"
+          onClick={() => {
+            // A pasteable dump of everything the brain reported. Bug reports
+            // about hardware are useless without it, and reading two dozen
+            // fields aloud is worse.
+            const lines = [
+              'VEXCollab brain report',
+              `when            ${new Date().toISOString()}`,
+              `device          ${snapshot.isV5Controller ? 'V5 controller' : 'V5 brain'}`,
+              `name / team     ${snapshot.brainName ?? '-'} / ${snapshot.teamNumber ?? '-'}`,
+              `uniqueId        ${snapshot.uniqueId?.toString(16).toUpperCase() ?? '-'}`,
+              `vexOS           ${snapshot.systemVersion ?? '-'}`,
+              `cpu0 / cpu1     ${snapshot.cpu0Version ?? '-'} / ${snapshot.cpu1Version ?? '-'}`,
+              `battery         ${snapshot.batteryPercent ?? '-'}%${snapshot.isCharging ? ' charging' : ''}`,
+              `program         active=${snapshot.activeProgram} running=${snapshot.isRunningProgram}`,
+              `match mode      ${snapshot.matchMode ?? '-'}`,
+              `field control   ${snapshot.isFieldControllerConnected}`,
+              `button          pressed=${snapshot.button.pressed} double=${snapshot.button.doublePressed}`,
+              `screen          ${snapshot.screen.whiteTheme ? 'light' : 'dark'}${snapshot.screen.reversed ? ' reversed' : ''} lang=${snapshot.screen.language ?? '-'}`,
+              `radio           avail=${snapshot.radio.isAvailable} conn=${snapshot.radio.isConnected} vexnet=${snapshot.radio.isVexNet} data=${snapshot.radio.isRadioData} ch=${snapshot.radio.channel ?? '-'} latency=${snapshot.radio.latency ?? '-'}`,
+              '',
+              `devices (${snapshot.devices.length})`,
+              ...snapshot.devices.map((d) => `  port ${d.port}  ${d.type}  v${d.version}`),
+              '',
+              `controllers (${snapshot.controllers.length})`,
+              ...snapshot.controllers.map(
+                (c) => `  ${c.isMaster ? 'primary' : 'partner'}  ${c.batteryPercent}%${c.isCharging ? ' charging' : ''}`,
+              ),
+              '',
+              `programs (${snapshot.programs.length})`,
+              ...snapshot.programs.map((p) => `  slot ${p.slot}  ${p.name}  ${p.size}B  ${p.binfile}`),
+              '',
+              `declared in code (${declaredDevices.length})`,
+              ...declaredDevices.map((d) => `  port ${d.port ?? '?'}  ${d.name}  ${d.type}`),
+              '',
+              `last error      ${snapshot.lastError ?? 'none'}`,
+            ];
+            void navigator.clipboard.writeText(lines.join('\n')).then(
+              () => setCopied(true),
+              () => setCopied(false),
+            );
+            window.setTimeout(() => setCopied(false), 2000);
+          }}
+          className="rounded-xl bg-panel-raised px-4 py-2.5 text-left text-[12px] shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition hover:bg-panel"
+        >
+          {copied ? 'Copied — paste it anywhere' : 'Copy a full brain report'}
+        </button>
+      )}
+
       <div className="flex items-center gap-2 rounded-xl bg-panel-raised px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
         <span
           className={`size-2 rounded-full ${connected ? 'bg-ok' : 'bg-ink-dim'}`}
