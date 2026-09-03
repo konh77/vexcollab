@@ -364,7 +364,8 @@ export class V5Session {
 
   async upload(request: UploadRequest): Promise<boolean> {
     const device = this.device;
-    if (!device?.isConnected) return false;
+    const conn = device?.connection;
+    if (!device?.isConnected || !conn) return false;
 
     const ini = new ProgramIniConfig();
     ini.autorun = true;
@@ -378,14 +379,55 @@ export class V5Session {
 
     this.patch({ transfer: { label: 'Starting', current: 0, total: 1 }, lastError: null });
     try {
-      const ok = await device.brain.uploadProgram(
-        ini,
-        request.payload,
-        request.coldPayload,
-        (label, current, total) => this.patch({ transfer: { label, current, total } }),
+      if (request.vendor === undefined) {
+        // The library's own path: ini and bin under FileVendor.USER.
+        const ok = await device.brain.uploadProgram(
+          ini,
+          request.payload,
+          request.coldPayload,
+          (label, current, total) => this.patch({ transfer: { label, current, total } }),
+        );
+        if (ok) await this.refreshPrograms();
+        return Boolean(ok);
+      }
+
+      // Same two files, but written under a chosen vendor. uploadProgramToDevice
+      // hardcodes USER and passes the field under the wrong name, so there is no
+      // way to reach VEXVM through it.
+      const base = ini.baseName;
+      const iniOk = await conn.uploadFileToDevice(
+        {
+          filename: `${base}.ini`,
+          buf: new TextEncoder().encode(ini.createIni()),
+          downloadTarget: FileDownloadTarget.FILE_TARGET_QSPI,
+          vendor: request.vendor,
+          autoRun: false,
+        },
+        (current, total) => this.patch({ transfer: { label: 'INI', current, total } }),
       );
-      if (ok) await this.refreshPrograms();
-      return Boolean(ok);
+      if (!iniOk) {
+        this.patch({ lastError: 'The brain refused the program descriptor (.ini)' });
+        return false;
+      }
+
+      const binOk = await conn.uploadFileToDevice(
+        {
+          filename: `${base}.bin`,
+          buf: request.payload,
+          downloadTarget: FileDownloadTarget.FILE_TARGET_QSPI,
+          vendor: request.vendor,
+          exttype: 'bin',
+          autoRun: true,
+        },
+        (current, total) => this.patch({ transfer: { label: 'BIN', current, total } }),
+      );
+      if (!binOk) {
+        this.patch({ lastError: 'The brain refused the program itself (.bin)' });
+        return false;
+      }
+
+      await this.refreshPrograms();
+      return true;
     } catch (error) {
       this.fail(error, 'Upload failed');
       return false;

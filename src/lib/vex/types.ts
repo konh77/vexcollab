@@ -77,6 +77,13 @@ export interface UploadRequest {
   payload: Uint8Array;
   /** Optional shared runtime image ("cold" file) the program links against. */
   coldPayload?: Uint8Array;
+  /**
+   * Which file vendor the program is written under. The library only ever uses
+   * USER, which is where compiled ARM code lives. The protocol also defines
+   * VEXVM (64), which is a plausible home for programs the on-board Python VM
+   * runs — untested, and exposed so it can be tried against real hardware.
+   */
+  vendor?: number;
 }
 
 export const EMPTY_SNAPSHOT: BrainSnapshot = {

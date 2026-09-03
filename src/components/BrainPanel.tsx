@@ -66,6 +66,7 @@ export function BrainPanel({
   const [description, setDescription] = useState('Uploaded from the browser');
   const [coldFile, setColdFile] = useState<File | null>(null);
   const [binFile, setBinFile] = useState<File | null>(null);
+  const [vendor, setVendor] = useState<'user' | 'vexvm'>('user');
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [insecureContext, setInsecureContext] = useState(false);
@@ -141,7 +142,14 @@ export function BrainPanel({
       const coldPayload = coldFile
         ? new Uint8Array(await coldFile.arrayBuffer())
         : undefined;
-      await session.upload({ slot, name: programName, description, payload, coldPayload });
+      await session.upload({
+        slot,
+        name: programName,
+        description,
+        payload,
+        coldPayload,
+        vendor: vendor === 'vexvm' ? 64 : undefined,
+      });
     } catch (error) {
       setBuildError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -486,6 +494,39 @@ export function BrainPanel({
               </div>
 
               {!binFile && (
+                <details className="rounded-lg bg-panel px-2.5 py-2 text-[11px]">
+                  <summary className="cursor-pointer select-none font-medium">
+                    Try uploading Python directly (experimental)
+                  </summary>
+                  <p className="mt-1.5 leading-relaxed text-ink-dim">
+                    A program slot normally holds compiled code under the{' '}
+                    <code>USER</code> vendor, which is why source is rejected. The protocol
+                    also defines a <code>VEXVM</code> vendor (64) — a plausible home for
+                    programs the brain&apos;s on-board Python VM runs. Nobody has documented
+                    this; trying it is how we find out.
+                  </p>
+                  <div className="mt-2 flex gap-1">
+                    {(['user', 'vexvm'] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setVendor(option)}
+                        className={`flex-1 rounded-md px-2 py-1.5 font-medium transition ${
+                          vendor === option ? 'bg-vex text-white' : 'bg-panel-raised hover:bg-edge'
+                        }`}
+                      >
+                        {option === 'user' ? 'USER (default)' : 'VEXVM (64)'}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-ink-dim">
+                    Upload to an <span className="font-medium text-ink">empty slot</span> —
+                    whatever is in the slot is overwritten either way.
+                  </p>
+                </details>
+              )}
+
+              {!binFile && vendor === 'user' && (
                 <div className="rounded-lg bg-vex/8 px-2.5 py-2">
                   <p className="text-[11px] leading-relaxed text-vex-soft">
                     <span className="font-medium">Without a .bin, this uploads your{' '}
