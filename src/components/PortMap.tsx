@@ -33,6 +33,9 @@ export function PortMap({ declared, actual, connected, onJump }: Props) {
     if (device.port != null) ports.set(device.port, { ...ports.get(device.port), declared: device });
   }
   for (const device of actual) {
+    // 22 and 23 are the ADI expander and the battery — internal, and never
+    // something your code declares, so they would only ever read as "missing".
+    if (device.port > 21) continue;
     ports.set(device.port, { ...ports.get(device.port), actual: device });
   }
 

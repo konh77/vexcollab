@@ -24,6 +24,32 @@ import { decodeScreenCapture, SCREEN_CAPTURE_BYTES } from './screen';
 
 const VEX_USB_VENDOR_ID = 0x2888;
 
+/**
+ * VexFirmwareVersion is a class, so String() on it yields "[object Object]".
+ * Real hardware caught this: the panel showed that for vexOS and both CPUs.
+ */
+function formatVersion(value: unknown): string | null {
+  if (value == null) return null;
+  const candidate = value as { toUserString?: () => string };
+  if (typeof candidate.toUserString === 'function') return candidate.toUserString();
+  const text = String(value);
+  return text === '[object Object]' ? null : text;
+}
+
+/**
+ * A V5 reports an entry for every smart port whether or not anything is
+ * plugged in. On real hardware the empty ones came back as type 129 with
+ * version 0 — a value absent from the protocol's enum — so twenty empty ports
+ * were being listed as devices. Anything unrecognised *with* a version is kept,
+ * so a genuinely new sensor still shows up rather than being hidden.
+ */
+function isRealDevice(type: SmartDeviceType | undefined, version: number): boolean {
+  if (type === undefined) return false;
+  if (type === SmartDeviceType.EMPTY || type === SmartDeviceType.UNDEFINED_SENSOR) return false;
+  const known = SmartDeviceType[type] !== undefined;
+  return known || version > 0;
+}
+
 function smartDeviceName(type: SmartDeviceType | undefined): string {
   if (type === undefined) return 'Unknown';
   const name = SmartDeviceType[type];
@@ -140,9 +166,9 @@ export class V5Session {
         brainName: brainName ? String(brainName) : null,
         teamNumber: teamNumber ? String(teamNumber) : null,
         uniqueId: brain.uniqueId ?? null,
-        systemVersion: brain.systemVersion ? String(brain.systemVersion) : null,
-        cpu0Version: brain.cpu0Version ? String(brain.cpu0Version) : null,
-        cpu1Version: brain.cpu1Version ? String(brain.cpu1Version) : null,
+        systemVersion: formatVersion(brain.systemVersion),
+        cpu0Version: formatVersion(brain.cpu0Version),
+        cpu1Version: formatVersion(brain.cpu1Version),
         batteryPercent: brain.battery.batteryPercent ?? null,
         isCharging: Boolean(brain.battery.isCharging),
         activeProgram: brain.activeProgram ?? 0,
@@ -168,11 +194,11 @@ export class V5Session {
           latency: device.radio.latency ?? null,
         },
         devices: device.devices
-          .filter((d) => d.isAvailable)
+          .filter((d) => d.isAvailable && isRealDevice(d.type, Number(d.version ?? 0)))
           .map((d) => ({
             port: d.port ?? 0,
             type: smartDeviceName(d.type),
-            version: d.version != null ? String(d.version) : '-',
+            version: formatVersion(d.version) ?? String(d.version ?? '-'),
           })),
         controllers: device.controllers
           .filter((c) => c.isAvailable)
