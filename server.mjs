@@ -160,12 +160,27 @@ function isAuthed(req) {
 }
 
 /** Paths that must stay reachable so the login page can render and submit. */
+/**
+ * Paths served before anyone is logged in. The icons matter: the browser asks
+ * for them on the login page too, and redirecting those requests to /login is
+ * why the tab showed no icon at all. They give nothing away.
+ */
+const PUBLIC_FILES = new Set([
+  '/favicon.ico',
+  '/favicon.svg',
+  '/icon.svg',
+  '/apple-icon.png',
+  '/apple-touch-icon.png',
+  '/manifest.webmanifest',
+  '/robots.txt',
+]);
+
 function isPublicPath(pathname) {
   return (
     pathname === '/login' ||
     pathname === '/api/auth' ||
     pathname.startsWith('/_next/') ||
-    pathname === '/favicon.ico'
+    PUBLIC_FILES.has(pathname)
   );
 }
 
