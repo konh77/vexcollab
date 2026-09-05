@@ -35,8 +35,44 @@ for (const file of ['.env.local', '.env']) {
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST ?? '0.0.0.0';
 const port = Number(process.env.PORT ?? 3000);
-const password = process.env.VEXCOLLAB_PASSWORD || null;
 const useHttps = process.env.VEXCOLLAB_HTTPS === '1';
+
+/**
+ * Public mode: the instance is open to anyone, so there is no password at all.
+ * A password would only be theatre once the address is shared, and asking
+ * strangers for one they cannot have just breaks the link. What protects the
+ * box instead are the capacity limits below.
+ */
+const publicMode = process.env.VEXCOLLAB_PUBLIC === '1';
+const password = publicMode ? null : process.env.VEXCOLLAB_PASSWORD || null;
+const passwordIgnored = publicMode && !!process.env.VEXCOLLAB_PASSWORD;
+
+const num = (name, fallback) => {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+};
+
+/**
+ * Capacity limits. The defaults assume the smallest box this is meant to run
+ * on — a Raspberry Pi sharing its memory with Caddy and a Next build — and are
+ * deliberately conservative: an open instance that stays up beats a generous
+ * one that gets OOM-killed. Every one is overridable.
+ *
+ * Rooms are memory-only, so the only thing bounding them is these numbers plus
+ * the sweeper; nothing here is ever written to disk.
+ */
+const LIMITS = {
+  maxRooms: num('VEXCOLLAB_MAX_ROOMS', publicMode ? 12 : 64),
+  maxPeersPerRoom: num('VEXCOLLAB_MAX_PEERS_PER_ROOM', 8),
+  maxConnections: num('VEXCOLLAB_MAX_CONNECTIONS', publicMode ? 48 : 256),
+  maxRoomsPerIp: num('VEXCOLLAB_MAX_ROOMS_PER_IP', publicMode ? 3 : 32),
+  /** A room with no edits for this long is dropped, even if sockets linger. */
+  idleMs: num('VEXCOLLAB_ROOM_IDLE_MINUTES', 30) * 60 * 1000,
+  /** Per-room document ceiling. Source files; not a file host. */
+  maxDocBytes: num('VEXCOLLAB_MAX_DOC_BYTES', 2 * 1024 * 1024),
+  /** Refuse to open new rooms once the heap is this full. */
+  maxHeapBytes: num('VEXCOLLAB_MAX_HEAP_MB', 320) * 1024 * 1024,
+};
 
 const COOKIE = 'vexcollab_auth';
 
@@ -206,18 +242,120 @@ const handle = app.getRequestHandler();
 /**
  * Rooms live in memory only. A room is dropped once the last peer leaves, which
  * is the same "no sign-up, nothing persisted" model the editor UI promises.
- * @type {Map<string, { doc: Y.Doc, peers: Map<string, { name: string, color: string }> }>}
+ * Nothing is ever written to disk, so an unused room costs nothing once it is
+ * gone from this map.
+ * @type {Map<string, {
+ *   doc: Y.Doc,
+ *   peers: Map<string, { name: string, color: string }>,
+ *   createdAt: number,
+ *   lastActivity: number,
+ *   pendingBytes: number,
+ *   measuredBytes: number,
+ *   measuredAt: number,
+ *   frozen: boolean,
+ *   creatorIp: string,
+ * }>}
  */
 const rooms = new Map();
 
-function getRoom(roomId) {
-  let room = rooms.get(roomId);
-  if (!room) {
-    room = { doc: new Y.Doc(), peers: new Map() };
-    rooms.set(roomId, room);
-  }
-  return room;
+const roomsCreatedByIp = new Map();
+
+function countRoomsForIp(ip) {
+  let n = 0;
+  for (const room of rooms.values()) if (room.creatorIp === ip) n += 1;
+  return n;
 }
+
+/** Frees a room's document and forgets it. Safe to call twice. */
+function dropRoom(roomId, reason) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  room.doc.destroy();
+  rooms.delete(roomId);
+  roomsCreatedByIp.delete(roomId);
+  if (reason) io.to(roomId).emit('room-closed', { reason });
+}
+
+/**
+ * Returns the room, or a reason why one cannot be opened. Joining a room that
+ * already exists is always allowed up to the per-room peer limit: the caps are
+ * there to stop unbounded *growth*, not to lock out the people already
+ * collaborating.
+ */
+function acquireRoom(roomId, ip) {
+  const existing = rooms.get(roomId);
+  if (existing) {
+    if (existing.peers.size >= LIMITS.maxPeersPerRoom) {
+      return { error: `This session is full (${LIMITS.maxPeersPerRoom} people).` };
+    }
+    return { room: existing };
+  }
+
+  if (rooms.size >= LIMITS.maxRooms) {
+    return { error: 'The server is at capacity. Try again in a few minutes.' };
+  }
+  if (countRoomsForIp(ip) >= LIMITS.maxRoomsPerIp) {
+    return { error: `You already have ${LIMITS.maxRoomsPerIp} sessions open.` };
+  }
+  if (process.memoryUsage().heapUsed > LIMITS.maxHeapBytes) {
+    return { error: 'The server is low on memory. Try again in a few minutes.' };
+  }
+
+  const now = Date.now();
+  const room = {
+    doc: new Y.Doc(),
+    peers: new Map(),
+    createdAt: now,
+    lastActivity: now,
+    pendingBytes: 0,
+    measuredBytes: 0,
+    measuredAt: 0,
+    frozen: false,
+    creatorIp: ip,
+  };
+  rooms.set(roomId, room);
+  return { room };
+}
+
+/**
+ * Measures a room's real document size, but at most once a second — encoding
+ * the whole state on every keystroke would cost more than the cap saves. The
+ * running total of applied update bytes is the cheap trigger.
+ */
+function overDocLimit(room) {
+  if (room.frozen) return true;
+  const now = Date.now();
+  if (room.pendingBytes < 64 * 1024 && now - room.measuredAt < 1000) return false;
+  room.measuredBytes = Y.encodeStateAsUpdate(room.doc).byteLength;
+  room.measuredAt = now;
+  room.pendingBytes = 0;
+  if (room.measuredBytes > LIMITS.maxDocBytes) {
+    room.frozen = true;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Sweeps rooms nobody is using. Empty rooms are already dropped the moment the
+ * last peer disconnects; this catches the cases that misses — a socket that
+ * died without a disconnect event, and rooms left open and untouched. Without
+ * it a long-lived public instance accumulates documents forever.
+ */
+const sweeper = setInterval(() => {
+  const now = Date.now();
+  for (const [roomId, room] of rooms) {
+    if (room.peers.size === 0) {
+      dropRoom(roomId);
+      continue;
+    }
+    if (now - room.lastActivity > LIMITS.idleMs) {
+      dropRoom(roomId, 'This session was closed after being idle.');
+    }
+  }
+}, 60 * 1000);
+// Never keep the process alive just to run the sweeper.
+sweeper.unref();
 
 await app.prepare();
 
@@ -270,7 +408,13 @@ const httpServer = credentials
   : createServer(requestHandler);
 
 const io = new SocketServer(httpServer, {
-  maxHttpBufferSize: 1e7,
+  // Yjs updates are small binary deltas. 10 MB was room for a pathological
+  // paste; 1 MB is still far more than an update needs and caps what a single
+  // message can make this box allocate.
+  maxHttpBufferSize: 1e6,
+  // Deflate costs CPU the Pi would rather spend elsewhere, and binary CRDT
+  // updates barely compress.
+  perMessageDeflate: false,
   // Same-origin only in production. The client connects to its own origin, so
   // there is no legitimate cross-origin socket.
   cors: { origin: dev ? '*' : false },
@@ -279,6 +423,11 @@ const io = new SocketServer(httpServer, {
 // A password on the page is worthless if the socket accepts anyone, so the
 // handshake is checked with the same cookie.
 io.use((socket, nextFn) => {
+  // Refuse before the handshake completes rather than after a room is picked,
+  // so an overloaded box spends nothing on connections it cannot serve.
+  if (io.engine.clientsCount > LIMITS.maxConnections) {
+    return nextFn(new Error('server is at capacity'));
+  }
   if (!password) return nextFn();
   const token = readCookie(socket.handshake.headers.cookie, COOKIE);
   if (token && safeEqual(token, sessionToken)) return nextFn();
@@ -291,8 +440,16 @@ io.on('connection', (socket) => {
 
   socket.on('join', ({ roomId, user }, ack) => {
     if (typeof roomId !== 'string' || !roomId) return;
+
+    const ip = socket.handshake.address ?? 'unknown';
+    const { room, error } = acquireRoom(roomId, ip);
+    if (error) {
+      ack?.({ error });
+      return;
+    }
+
     joinedRoom = roomId;
-    const room = getRoom(roomId);
+    room.lastActivity = Date.now();
     room.peers.set(socket.id, {
       name: String(user?.name ?? 'Anonymous').slice(0, 32),
       color: String(user?.color ?? '#888888').slice(0, 9),
@@ -311,12 +468,28 @@ io.on('connection', (socket) => {
     const room = rooms.get(joinedRoom);
     if (!room) return;
     const bytes = new Uint8Array(update);
+
+    room.pendingBytes += bytes.byteLength;
+    if (overDocLimit(room)) {
+      // Stop growing, but keep the room usable and readable rather than
+      // dropping it under someone's hands.
+      socket.emit('limit', {
+        reason: `This session has reached its ${Math.round(LIMITS.maxDocBytes / 1024)} KB limit. Further edits are not being shared.`,
+      });
+      return;
+    }
+
+    room.lastActivity = Date.now();
     Y.applyUpdate(room.doc, bytes);
     socket.to(joinedRoom).emit('update', bytes);
   });
 
   socket.on('awareness', (update) => {
     if (!joinedRoom) return;
+    // Cursor movement keeps a room alive: someone watching without typing is
+    // still using it.
+    const room = rooms.get(joinedRoom);
+    if (room) room.lastActivity = Date.now();
     socket.to(joinedRoom).emit('awareness', new Uint8Array(update));
   });
 
@@ -326,8 +499,7 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.peers.delete(socket.id);
     if (room.peers.size === 0) {
-      room.doc.destroy();
-      rooms.delete(joinedRoom);
+      dropRoom(joinedRoom);
     } else {
       io.to(joinedRoom).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
     }
@@ -341,11 +513,29 @@ httpServer.listen(port, hostname, () => {
   for (const address of lan) {
     console.log(`  On your Wi-Fi      ${scheme}://${address}:${port}`);
   }
-  console.log(
-    password
-      ? '\n  Password required. Share it with your team along with the link.\n'
-      : '\n  No password set. Anyone on your network can open this.\n  Set VEXCOLLAB_PASSWORD to require one.\n',
-  );
+  if (publicMode) {
+    console.log(
+      '\n  Public mode. No password — anyone with the link can open a session.\n' +
+        `  Limits: ${LIMITS.maxRooms} sessions, ${LIMITS.maxPeersPerRoom} people each, ` +
+        `${LIMITS.maxConnections} connections,\n` +
+        `          ${LIMITS.maxRoomsPerIp} sessions per address, ` +
+        `${Math.round(LIMITS.maxDocBytes / 1024)} KB per session,\n` +
+        `          idle sessions dropped after ${Math.round(LIMITS.idleMs / 60000)} minutes.\n` +
+        '  Nothing is written to disk; a session is gone once its last person leaves.\n',
+    );
+    if (passwordIgnored) {
+      console.log(
+        '  VEXCOLLAB_PASSWORD is set but ignored: public mode has no password.\n' +
+          '  Unset VEXCOLLAB_PUBLIC to require one again.\n',
+      );
+    }
+  } else {
+    console.log(
+      password
+        ? '\n  Password required. Share it with your team along with the link.\n'
+        : '\n  No password set. Anyone on your network can open this.\n  Set VEXCOLLAB_PASSWORD to require one.\n',
+    );
+  }
   if (lan.length && !credentials) {
     console.log(
       '  Note: the brain can only be reached from localhost. Browsers block USB\n' +

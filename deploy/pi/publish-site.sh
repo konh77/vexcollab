@@ -38,7 +38,7 @@ fi
 
 log "Packing $(find "$SITE_DIR" -type f | wc -l | tr -d ' ') files"
 BUNDLE="$(mktemp -t vexcollab-site).tar.gz"
-tar -czf "$BUNDLE" -C "$SITE_DIR" .
+tar -czf "$BUNDLE" --exclude="*.bak" --exclude=".claude" --exclude=".DS_Store" -C "$SITE_DIR" .
 
 # The remote half is written to a file and executed there. Piping it to
 # `bash -s` over `ssh -t` does not work: the TTY that lets sudo prompt for a

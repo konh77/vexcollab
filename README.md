@@ -172,6 +172,44 @@ npx github:ponpon77/vexcollab --password pit22
 Do this on school or venue Wi-Fi. Other options: `--port 4000`, `--https`,
 `--copilot`, `--help`.
 
+## Open it to everyone
+
+A password stops being useful once you want anyone to be able to use the link —
+you would just be handing it out alongside the address. Public mode drops it and
+protects the machine with capacity limits instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh \
+  | sudo bash -s -- your-domain.org --public
+```
+
+Sessions were always memory-only; public mode makes sure unused ones cannot pile
+up. A session is deleted the instant its last person leaves, and a sweeper drops
+any that go unused — which also catches sockets that died without saying so.
+Nothing is ever written to disk, so an unused session costs nothing once gone.
+
+New sessions are refused before the box is in trouble, never by cutting off
+people already working: joining an existing session keeps working right up to
+its own limit, and a refusal explains itself in the editor instead of failing
+silently. The defaults suit a Raspberry Pi sharing memory with Caddy — 12
+sessions, 8 people each, 48 connections, 3 sessions per address, 2 MB per
+session, idle ones dropped after 30 minutes. Every one is an environment
+variable in `/etc/vexcollab.env`:
+
+| Variable | Default | |
+| --- | --- | --- |
+| `VEXCOLLAB_MAX_ROOMS` | 12 | concurrent sessions |
+| `VEXCOLLAB_MAX_PEERS_PER_ROOM` | 8 | people in one session |
+| `VEXCOLLAB_MAX_CONNECTIONS` | 48 | sockets in total |
+| `VEXCOLLAB_MAX_ROOMS_PER_IP` | 3 | sessions one address may open |
+| `VEXCOLLAB_ROOM_IDLE_MINUTES` | 30 | before an unused session is dropped |
+| `VEXCOLLAB_MAX_DOC_BYTES` | 2097152 | per-session document ceiling |
+| `VEXCOLLAB_MAX_HEAP_MB` | 320 | stop opening sessions past this |
+
+The service is also capped by systemd (`MemoryMax=512M`) and runs with a V8 heap
+limit, so if an open instance ever does run away it is killed on its own rather
+than taking Caddy — and the rest of the Pi — down with it.
+
 ## GitHub Copilot
 
 ```bash

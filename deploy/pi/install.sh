@@ -5,12 +5,28 @@
 #
 # Idempotent: safe to re-run to upgrade.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ponpon77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- konh.org
+#   curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- konh.org
+#
+# Add --public to run an instance open to anyone: no password, and the
+# capacity limits in server.mjs are switched to their conservative defaults so
+# that a small box stays up under strangers.
+#
+#   ... | sudo bash -s -- konh.org --public
 #
 set -euo pipefail
 
+PUBLIC=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --public) PUBLIC=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
 DOMAIN="${1:-${VEXCOLLAB_DOMAIN:-konh.org}}"
-REPO="${VEXCOLLAB_REPO:-https://github.com/ponpon77/vexcollab.git}"
+REPO="${VEXCOLLAB_REPO:-https://github.com/konh77/vexcollab.git}"
 APP_DIR=/opt/vexcollab
 ENV_FILE=/etc/vexcollab.env
 APP_USER=vexcollab
@@ -116,11 +132,38 @@ if ! nice -n 10 ionice -c3 sudo -u "$APP_USER" env \
 fi
 
 # --- configuration ----------------------------------------------------------
-# The room password is generated once and then left alone across upgrades.
+# Written once and then left alone across upgrades, so a re-run never changes
+# the password or silently flips a public instance back to a private one.
 if [ ! -f "$ENV_FILE" ]; then
-  log "Generating a room password"
-  PASSWORD="$(head -c 12 /dev/urandom | base64 | tr -d '+/=' | cut -c1-12)"
-  cat > "$ENV_FILE" <<EOF
+  if [ "$PUBLIC" -eq 1 ]; then
+    log "Configuring a public instance (no password)"
+    cat > "$ENV_FILE" <<EOF
+# VEXCollab configuration. Keep this file private.
+NODE_ENV=production
+HOST=127.0.0.1
+PORT=3000
+VEXCOLLAB_TRUST_PROXY=1
+VEXCOLLAB_DATA_DIR=/var/lib/vexcollab/data
+
+# Open to anyone: no password. What keeps this box healthy instead are the
+# capacity limits below. Sessions are memory-only and are deleted the moment
+# their last person leaves, so nothing unused is ever kept.
+VEXCOLLAB_PUBLIC=1
+VEXCOLLAB_MAX_ROOMS=12
+VEXCOLLAB_MAX_PEERS_PER_ROOM=8
+VEXCOLLAB_MAX_CONNECTIONS=48
+VEXCOLLAB_MAX_ROOMS_PER_IP=3
+VEXCOLLAB_ROOM_IDLE_MINUTES=30
+VEXCOLLAB_MAX_DOC_BYTES=2097152
+VEXCOLLAB_MAX_HEAP_MB=320
+
+# Optional: register a GitHub OAuth app to enable "Sign in with GitHub".
+# VEXCOLLAB_GITHUB_CLIENT_ID=
+EOF
+  else
+    log "Generating a room password"
+    PASSWORD="$(head -c 12 /dev/urandom | base64 | tr -d '+/=' | cut -c1-12)"
+    cat > "$ENV_FILE" <<EOF
 # VEXCollab configuration. Keep this file private.
 NODE_ENV=production
 HOST=127.0.0.1
@@ -131,6 +174,7 @@ VEXCOLLAB_DATA_DIR=/var/lib/vexcollab/data
 # Optional: register a GitHub OAuth app to enable "Sign in with GitHub".
 # VEXCOLLAB_GITHUB_CLIENT_ID=
 EOF
+  fi
   chmod 600 "$ENV_FILE"
   chown root:root "$ENV_FILE"
 fi
@@ -150,9 +194,19 @@ User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=/usr/bin/node ${APP_DIR}/server.mjs
+ExecStart=/usr/bin/node --max-old-space-size=384 ${APP_DIR}/server.mjs
 Restart=always
 RestartSec=3
+
+# A public instance must not be able to take the whole Pi down with it. The
+# heap cap makes V8 collect instead of ballooning; MemoryMax is the backstop
+# that kills only this service rather than letting the kernel's OOM killer
+# pick a victim — which on this box could just as easily be Caddy.
+MemoryMax=512M
+MemoryHigh=384M
+TasksMax=256
+# Be the first thing sacrificed if the box does run out anyway.
+OOMScoreAdjust=500
 
 # The app needs the network, its own data directory, and nothing else.
 NoNewPrivileges=yes
@@ -295,13 +349,18 @@ systemctl daemon-reload
 systemctl enable --now vexcollab-ddns.timer
 
 # --- done -------------------------------------------------------------------
-PASSWORD_LINE="$(grep '^VEXCOLLAB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+PASSWORD_LINE="$(grep '^VEXCOLLAB_PASSWORD=' "$ENV_FILE" | cut -d= -f2- || true)"
+if grep -q '^VEXCOLLAB_PUBLIC=1' "$ENV_FILE"; then
+  ACCESS="Access      Public — no password"
+else
+  ACCESS="Password    ${PASSWORD_LINE}"
+fi
 cat <<EOF
 
   VEXCollab is installed.
 
     Address     https://${DOMAIN}
-    Password    ${PASSWORD_LINE}
+    ${ACCESS}
 
   On your router, forward ONLY ports 80 and 443 to this Pi.
   Do not forward port 22 — SSH is restricted to your LAN.

@@ -76,13 +76,24 @@ export class CollabProvider {
 
     this.socket.on('connect', () => {
       this.errorListeners.forEach((l) => l(null));
-      this.socket.emit('join', { roomId, user }, (res: { update: ArrayBuffer }) => {
-        if (this.destroyed) return;
-        Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
-        this.broadcastLocalAwareness();
-        this.hasSynced = true;
-        this.syncedListeners.forEach((l) => l());
-      });
+      this.socket.emit(
+        'join',
+        { roomId, user },
+        (res: { update?: ArrayBuffer; error?: string }) => {
+          if (this.destroyed) return;
+          // The server refuses a join when it is at capacity or the session is
+          // full. Reconnecting would not help, so explain and stop trying.
+          if (res?.error || !res?.update) {
+            this.errorListeners.forEach((l) => l(res?.error ?? 'The server refused this session.'));
+            this.socket.disconnect();
+            return;
+          }
+          Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
+          this.broadcastLocalAwareness();
+          this.hasSynced = true;
+          this.syncedListeners.forEach((l) => l());
+        },
+      );
       this.connectedListeners.forEach((l) => l(true));
     });
 
@@ -100,6 +111,18 @@ export class CollabProvider {
     this.socket.on('announce-awareness', () => this.broadcastLocalAwareness());
 
     this.socket.on('peers', (peers: Peer[]) => this.peersListeners.forEach((l) => l(peers)));
+
+    // The server dropped this session — idle too long, or it hit its size cap.
+    // Both are one-way, so report them and stay off rather than reconnecting
+    // into a room that no longer exists.
+    this.socket.on('room-closed', ({ reason }: { reason: string }) => {
+      this.errorListeners.forEach((l) => l(reason));
+      this.socket.disconnect();
+    });
+
+    this.socket.on('limit', ({ reason }: { reason: string }) => {
+      this.errorListeners.forEach((l) => l(reason));
+    });
 
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload);
