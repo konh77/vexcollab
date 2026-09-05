@@ -9,3 +9,11 @@ npm-debug.log*
 next-env.d.ts
 .vercel
 *.tsbuildinfo
+
+# The konh.org website is a separate, private project. It is deployed to the
+# same Pi by deploy/pi/publish-site.sh, but its files must never be committed
+# here — this repo is AGPL and public.
+konh-site/
+konh.org-static*
+/site/
+/www/

@@ -46,6 +46,13 @@ project so it stays diffable against upstream. The only local change is a
 `@ts-nocheck` pragma per file. Anything VEXCollab-specific belongs in
 `src/lib/vex/`, which wraps it. See that directory's `VENDORED.md`.
 
+**Never commit the konh.org website here.** It is a separate, private project
+that happens to be deployed to the same Raspberry Pi by
+`deploy/pi/publish-site.sh`. The script reads it from a path outside this repo
+and copies it straight to the Pi; its files must not enter this repository,
+which is public and AGPL. `.gitignore` guards the obvious paths, but do not
+work around it.
+
 **This project is AGPL-3.0.** New dependencies must be license-compatible
 (MIT/BSD/Apache-2.0/LGPL are fine; anything proprietary or GPL-incompatible is
 not). Keep `NOTICE` current when adding third-party code.
