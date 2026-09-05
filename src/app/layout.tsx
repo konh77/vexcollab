@@ -3,6 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'VEXCollab',
+  icons: { icon: '/favicon.svg', apple: '/favicon.svg' },
   description:
     'Write VEX V5 Python with your whole team in the browser, then upload it straight to the brain over USB.',
 };

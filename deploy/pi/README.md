@@ -80,6 +80,23 @@ sudo systemctl restart vexcollab
 Upgrade by re-running the installer — it is idempotent and keeps your password
 and data.
 
+## Publishing a static site alongside the app
+
+The Pi can serve an ordinary website at your apex domain while VEXCollab keeps
+its own subdomain. From your own machine:
+
+```bash
+./deploy/pi/publish-site.sh ~/Downloads/konh.org-static konh.org
+```
+
+It copies the folder over, serves it from `/var/www/<domain>`, adds a Caddy
+block (leaving the app's alone), and reloads. Caddy gets the certificate for the
+new name by itself. Re-run it any time to publish an update — the old files are
+removed rather than merged, so deletions upstream take effect.
+
+Point an `A` record for the apex at the same IP first, or the certificate cannot
+be issued.
+
 ## Dynamic DNS (do this — your IP will change)
 
 Home connections change address without warning. When that happens the domain
