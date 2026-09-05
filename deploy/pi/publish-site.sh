@@ -15,6 +15,17 @@ set -euo pipefail
 SITE_DIR="${1:-}"
 DOMAIN="${2:-}"
 SSH_HOST="${3:-vexcollab}"
+# Only serve www when it actually resolves. Certificates cover every name in
+# the block, so listing a hostname with no DNS record fails the whole
+# certificate — including the apex, which then serves plain HTTP and nothing
+# else. Learned the hard way.
+WWW_HOST=""
+if host "www.${DOMAIN}" >/dev/null 2>&1 || dig +short "www.${DOMAIN}" | grep -q .; then
+  WWW_HOST=", www.${DOMAIN}"
+  echo "  www.${DOMAIN} resolves — it will be served too"
+else
+  echo "  www.${DOMAIN} has no DNS record — serving the apex only"
+fi
 
 if [ -z "$SITE_DIR" ] || [ -z "$DOMAIN" ]; then
   echo "usage: $0 <folder> <domain> [ssh-host]" >&2
@@ -34,9 +45,10 @@ scp -q "$BUNDLE" "$SSH_HOST:/tmp/site.tar.gz"
 rm -f "$BUNDLE"
 
 log "Installing on the Pi (this asks for your sudo password)"
-ssh -t "$SSH_HOST" "sudo bash -s -- '$DOMAIN'" <<'REMOTE'
+ssh -t "$SSH_HOST" "sudo bash -s -- '$DOMAIN' '$WWW_HOST'" <<'REMOTE'
 set -euo pipefail
 DOMAIN="$1"
+WWW_HOST="${2:-}"
 ROOT="/var/www/${DOMAIN}"
 
 mkdir -p "$ROOT"
@@ -52,7 +64,7 @@ find "$ROOT" -type d -exec chmod 755 {} + ; find "$ROOT" -type f -exec chmod 644
 if ! grep -q "^${DOMAIN} {" /etc/caddy/Caddyfile 2>/dev/null; then
   cat >> /etc/caddy/Caddyfile <<EOF
 
-${DOMAIN}, www.${DOMAIN} {
+${DOMAIN}${WWW_HOST} {
 	root * ${ROOT}
 	encode zstd gzip
 	file_server
