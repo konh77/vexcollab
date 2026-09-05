@@ -10,6 +10,11 @@ next-env.d.ts
 .vercel
 *.tsbuildinfo
 
+# Per-user runtime state. The Copilot language server keeps its OAuth token in
+# .vexcollab-data/copilot/<user>/.config/github-copilot/auth.db — committing
+# that publishes a live GitHub credential, which is exactly what happened once.
+.vexcollab-data/
+
 # The konh.org website is a separate, private project. It is deployed to the
 # same Pi by deploy/pi/publish-site.sh, but its files must never be committed
 # here — this repo is AGPL and public.
