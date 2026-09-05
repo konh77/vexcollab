@@ -74,14 +74,13 @@ Searches every file in the room at once. Click a result to jump straight to it.
 Plug a V5 into USB, press **Connect USB**, and pick the VEX port when the browser
 asks. Then you get:
 
-- **Send your program** to any slot, run it, stop it
+- **Send a compiled `.bin`** to any slot, run it, stop it
 - **Watch it run** — anything your program prints appears in the terminal
 - **Live graphs** — print `heading=12.4` and it draws itself as a chart
 - **Test autonomous** without a competition switch, by flipping the brain between
   disabled / driver / autonomous
 - **See everything about the robot** — battery, firmware, every port, both
   controllers, radio signal, files on the brain
-- **Take a picture of the brain's screen**
 - **Update vexOS**
 
 If your program crashes, the error message becomes clickable — press it and you
@@ -203,17 +202,15 @@ on a proven, independent implementation of VEX's USB protocol, so it isn't
 guesswork — but the first upload deserves a robot you don't mind power-cycling.
 Two things to watch:
 
-1. **Uploading Python does not work — confirmed on hardware, twice.** A V5
-   program slot holds compiled code, and vexOS 1.1.5 rejects uploaded source as
-   an *invalid user program*. Writing it under the protocol's `VEXVM` vendor
-   instead was also tried, and the brain refuses that write outright. How VEXcode
-   packages Python for the on-board VM is not publicly documented and needs more
-   than a vendor change. **Build in VEXcode and upload the `.bin` it produces** —
-   that path works, and the upload panel asks for it directly.
-2. **Screen capture does not work — confirmed on vexOS 1.1.5.** The brain
-   acknowledges the capture command but never answers the read that follows, so
-   no image comes back. Probed directly over USB, not just through the app.
-   Everything else on the brain panel works.
+**Uploading Python source does not work, and the feature has been removed.** A V5
+program slot holds compiled code; vexOS 1.1.5 rejects source as an *invalid user
+program*, and writing it under the protocol's `VEXVM` vendor is refused outright.
+Both were tested on hardware. **Build in VEXcode and upload the `.bin`** — that
+works, and it is what the upload panel asks for.
+
+**Screen capture has been removed** for the same reason: the brain acknowledges
+the capture command and then never answers the read, confirmed by probing the
+USB protocol directly.
 
 Found something on real hardware? Please open an issue — that's exactly the gap.
 

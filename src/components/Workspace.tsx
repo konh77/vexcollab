@@ -176,13 +176,6 @@ export function Workspace({
         run: () => void session.stopProgram(),
       },
       {
-        id: 'brain.screen',
-        label: 'Capture the brain screen',
-        group: 'Brain',
-        disabled: snapshot.connectionState !== 'connected',
-        run: () => void session.captureScreen(),
-      },
-      {
         id: 'view.terminal',
         label: showTerminal ? 'Hide the terminal' : 'Show the terminal',
         group: 'View',

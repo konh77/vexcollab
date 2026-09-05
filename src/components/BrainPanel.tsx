@@ -10,7 +10,6 @@ import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
 import { FieldMap } from './FieldMap';
 import { PortMap } from './PortMap';
 import { firmwareState } from '@/lib/vex/firmware';
-import { pythonPayload } from '@/lib/vex/program';
 import type { V5Session } from '@/lib/vex/session';
 import type { Series } from '@/lib/vex/telemetry';
 import type { BrainFile, BrainSnapshot } from '@/lib/vex/types';
@@ -64,10 +63,7 @@ export function BrainPanel({
   const [slot, setSlot] = useState<SlotNumber>(1);
   const [programName, setProgramName] = useState('VEXCollab');
   const [description, setDescription] = useState('Uploaded from the browser');
-  const [coldFile, setColdFile] = useState<File | null>(null);
   const [binFile, setBinFile] = useState<File | null>(null);
-  const [vendor, setVendor] = useState<'user' | 'vexvm'>('user');
-  const [screenshot, setScreenshot] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [insecureContext, setInsecureContext] = useState(false);
   const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
@@ -131,24 +127,15 @@ export function BrainPanel({
   }
 
   const upload = async () => {
+    if (!binFile) return;
     setBusy(true);
     setBuildError(null);
     try {
-      // A prebuilt .bin is the path that actually works today; the bundled
-      // Python path is kept but is known to be rejected by vexOS 1.1.5.
-      const payload = binFile
-        ? new Uint8Array(await binFile.arrayBuffer())
-        : pythonPayload(getProgram());
-      const coldPayload = coldFile
-        ? new Uint8Array(await coldFile.arrayBuffer())
-        : undefined;
       await session.upload({
         slot,
         name: programName,
         description,
-        payload,
-        coldPayload,
-        vendor: vendor === 'vexvm' ? 64 : undefined,
+        payload: new Uint8Array(await binFile.arrayBuffer()),
       });
     } catch (error) {
       setBuildError(error instanceof Error ? error.message : String(error));
@@ -167,14 +154,6 @@ export function BrainPanel({
     }
   };
 
-  const capture = async () => {
-    setBusy(true);
-    try {
-      setScreenshot(await session.captureScreen());
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="vc-scroll flex h-full flex-col gap-3 overflow-y-auto bg-panel p-2.5">
@@ -483,90 +462,25 @@ export function BrainPanel({
                 {binFile ? (
                   <p className="mt-1 text-[11px] leading-relaxed text-ok">
                     Uploading <span className="font-medium">{binFile.name}</span> (
-                    {Math.round(binFile.size / 1024)} KB).
+                    {Math.round(binFile.size / 1024)} KB) to slot {slot}.
                   </p>
                 ) : (
                   <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">
-                    Build your project in VEXcode and pick the <code>.bin</code> it produces.
-                    This is the path that is known to work.
+                    Build in VEXcode and pick the <code>.bin</code> it produces. A slot holds
+                    compiled code, so source cannot be uploaded directly — tested, and the
+                    brain refuses it.
                   </p>
                 )}
               </div>
 
-              {!binFile && (
-                <details className="rounded-lg bg-panel px-2.5 py-2 text-[11px]">
-                  <summary className="cursor-pointer select-none font-medium">
-                    Try uploading Python directly (experimental)
-                  </summary>
-                  <p className="mt-1.5 leading-relaxed text-ink-dim">
-                    A program slot normally holds compiled code under the{' '}
-                    <code>USER</code> vendor, which is why source is rejected. The protocol
-                    also defines a <code>VEXVM</code> vendor (64).{' '}
-                    <span className="font-medium text-ink">
-                      Tested on vexOS 1.1.5: the brain refuses the write outright.
-                    </span>{' '}
-                    Left here so the result is recorded rather than retried — Python needs
-                    more than a different vendor.
-                  </p>
-                  <div className="mt-2 flex gap-1">
-                    {(['user', 'vexvm'] as const).map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => setVendor(option)}
-                        className={`flex-1 rounded-md px-2 py-1.5 font-medium transition ${
-                          vendor === option ? 'bg-vex text-white' : 'bg-panel-raised hover:bg-edge'
-                        }`}
-                      >
-                        {option === 'user' ? 'USER (default)' : 'VEXVM (64)'}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-ink-dim">
-                    Upload to an <span className="font-medium text-ink">empty slot</span> —
-                    whatever is in the slot is overwritten either way.
-                  </p>
-                </details>
-              )}
-
-              {!binFile && vendor === 'user' && (
-                <div className="rounded-lg bg-vex/8 px-2.5 py-2">
-                  <p className="text-[11px] leading-relaxed text-vex-soft">
-                    <span className="font-medium">Without a .bin, this uploads your{' '}
-                    {programFileCount} Python file{programFileCount === 1 ? '' : 's'} as source
-                    — and vexOS rejects that as an invalid program.</span>{' '}
-                    The brain expects compiled code in a program slot; how VEXcode packages
-                    Python is not publicly documented. Pick a .bin above until that is solved.
-                  </p>
-                </div>
-              )}
-
-              {buildError && (
-                <pre className="vc-scroll max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-vex/8 p-2 text-[10px] leading-relaxed text-vex-soft">
-                  {buildError}
-                </pre>
-              )}
-
-              <details className="text-xs text-ink-dim">
-                <summary className="cursor-pointer select-none">Runtime image (advanced)</summary>
-                <p className="mt-1">
-                  If your brain needs the shared Python runtime uploaded alongside the program,
-                  point at the image from your own VEXcode install. It is never bundled here.
-                </p>
-                <input
-                  type="file"
-                  onChange={(event) => setColdFile(event.target.files?.[0] ?? null)}
-                  className="mt-1 w-full text-xs"
-                />
-              </details>
 
               <button
                 type="button"
                 onClick={upload}
-                disabled={busy || Boolean(snapshot.transfer)}
+                disabled={busy || !binFile || Boolean(snapshot.transfer)}
                 className="w-full rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
               >
-                {binFile ? `Upload ${binFile.name} to slot ${slot}` : `Upload to slot ${slot}`}
+                {binFile ? `Upload ${binFile.name} to slot ${slot}` : 'Choose a .bin first'}
               </button>
             </div>
           </Section>
@@ -769,38 +683,6 @@ export function BrainPanel({
             })()}
           </Section>
 
-          <Section title="Brain screen">
-            <button
-              type="button"
-              onClick={capture}
-              disabled={busy || Boolean(snapshot.transfer)}
-              className="rounded-md bg-panel px-3 py-1.5 text-xs transition hover:bg-edge disabled:opacity-50"
-            >
-              Capture screen
-            </button>
-            {screenshot ? (
-              <div className="mt-2.5 space-y-2">
-                {/* The V5 LCD is 480x272; keep that ratio so it looks like the brain. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={screenshot}
-                  alt="VEX V5 brain screen"
-                  className="w-full rounded-lg border border-black/10 bg-[#1b1b1f]"
-                  style={{ aspectRatio: '480 / 272' }}
-                />
-                <a href={screenshot} download="v5-screen.png" className="text-[11.5px] text-vex hover:underline">
-                  Save PNG
-                </a>
-              </div>
-            ) : (
-              <div
-                className="mt-2.5 grid place-items-center rounded-lg border border-black/10 bg-[#1b1b1f] text-[11px] text-[#86868b]"
-                style={{ aspectRatio: '480 / 272' }}
-              >
-                No capture yet
-              </div>
-            )}
-          </Section>
         </>
       )}
 

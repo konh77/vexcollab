@@ -18,9 +18,7 @@ import {
 } from '@/lib/v5-serial-protocol/Vex';
 import { V5SerialDevice } from '@/lib/v5-serial-protocol/VexDevice';
 import { ProgramIniConfig } from '@/lib/v5-serial-protocol/VexIniConfig';
-import { ScreenCaptureH2DPacket } from '@/lib/v5-serial-protocol/VexPacket';
 import { EMPTY_SNAPSHOT, type BrainFile, type BrainSnapshot, type UploadRequest } from './types';
-import { decodeScreenCapture, SCREEN_CAPTURE_BYTES, SCREEN_WIDTH } from './screen';
 
 const VEX_USB_VENDOR_ID = 0x2888;
 
@@ -485,68 +483,6 @@ export class V5Session {
     } catch (error) {
       this.fail(error, 'Firmware update failed');
       return false;
-    } finally {
-      this.patch({ transfer: null });
-    }
-  }
-
-  // --- screen capture -----------------------------------------------------
-
-  /** Grabs the brain's framebuffer and returns it as a PNG data URL. */
-  async captureScreen(): Promise<string | null> {
-    const conn = this.device?.connection;
-    if (!conn) return null;
-
-    this.patch({ transfer: { label: 'Screen', current: 0, total: SCREEN_CAPTURE_BYTES }, lastError: null });
-    try {
-      await conn.writeDataAsync(new ScreenCaptureH2DPacket(0));
-
-      // The brain copies the framebuffer into its capture buffer after
-      // acknowledging the command, not before. Reading immediately raced that
-      // copy and came back as a failed ReadFileReply on real hardware.
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      // Ask the brain for the size first. On vexOS 1.1.5 it answers 0, so fall
-      // back to the framebuffer's known geometry rather than giving up.
-      const attempts: { label: string; size?: number }[] = [
-        { label: 'reported size' },
-        { label: 'framebuffer size', size: SCREEN_CAPTURE_BYTES },
-      ];
-
-      // On vexOS 1.1.5 the capture-buffer read can never reply at all, which
-      // hangs rather than fails. Bound it so the UI always comes back.
-      const withDeadline = <T,>(work: Promise<T>, ms: number): Promise<T> =>
-        Promise.race([
-          work,
-          new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`no reply within ${ms / 1000}s`)), ms),
-          ),
-        ]);
-
-      const failures: string[] = [];
-      for (const attempt of attempts) {
-        try {
-          const raw = await withDeadline(conn.downloadFileToHost(
-            { filename: 'screen', vendor: FileVendor.SYS, loadAddress: 0, size: attempt.size },
-            FileDownloadTarget.FILE_TARGET_CBUF,
-            (current, total) => this.patch({ transfer: { label: 'Screen', current, total } }),
-          ), 15000);
-          if (raw && raw.length >= SCREEN_WIDTH * 4) return decodeScreenCapture(raw);
-          failures.push(`${attempt.label}: ${raw?.length ?? 0} bytes`);
-        } catch (error) {
-          failures.push(`${attempt.label}: ${(error as Error).message}`);
-        }
-      }
-
-      this.patch({
-        lastError:
-          `Screen capture is not working on this brain (${failures.join('; ')}). ` +
-          `vexOS 1.1.5 does not answer the capture-buffer read this build uses.`,
-      });
-      return null;
-    } catch (error) {
-      this.fail(error, 'Screen capture failed');
-      return null;
     } finally {
       this.patch({ transfer: null });
     }
