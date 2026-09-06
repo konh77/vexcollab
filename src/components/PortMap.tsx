@@ -6,17 +6,28 @@
  * a Motor, the brain says port 7 is empty. That mismatch is behind a huge share
  * of "it worked yesterday" problems, and neither the code nor the brain alone
  * can tell you about it.
+ *
+ * And once the mismatch is visible, the obvious next thing is to fix it from
+ * here — so a port the brain reports but the code has never heard of can be
+ * assigned a variable without typing the declaration out.
  */
 'use client';
 
+import { useState } from 'react';
 import type { DeclaredDevice } from '@/lib/editor/useAnalysis';
 import type { SmartDeviceView } from '@/lib/vex/types';
+import { AssignDevice } from './AssignDevice';
 
 interface Props {
   declared: DeclaredDevice[];
   actual: SmartDeviceView[];
   connected: boolean;
   onJump: (file: string, line: number) => void;
+  /**
+   * Writes a finished declaration into the project. Absent when there is no
+   * document to write into, which is what hides the assign controls.
+   */
+  onAssign?: (declaration: string) => void;
 }
 
 /** Normalises "Motor"/"MOTOR"/"Motor 29" so the two sources can be compared. */
@@ -27,7 +38,10 @@ function sameKind(a: string, b: string): boolean {
   return x.startsWith(y) || y.startsWith(x);
 }
 
-export function PortMap({ declared, actual, connected, onJump }: Props) {
+export function PortMap({ declared, actual, connected, onJump, onAssign }: Props) {
+  // Which port's assign form is open. Null means none.
+  const [assigning, setAssigning] = useState<number | null>(null);
+
   const ports = new Map<number, { declared?: DeclaredDevice; actual?: SmartDeviceView }>();
   for (const device of declared) {
     if (device.port != null) ports.set(device.port, { ...ports.get(device.port), declared: device });
@@ -40,63 +54,131 @@ export function PortMap({ declared, actual, connected, onJump }: Props) {
   }
 
   const rows = [...ports.entries()].sort((a, b) => a[0] - b[0]);
+  const declaredPorts = declared.map((d) => d.port).filter((p): p is number => p != null);
+  const takenNames = declared.map((d) => d.name);
+
+  // A port to open the manual form on: the lowest one nothing is using yet.
+  const firstFreePort = (() => {
+    for (let port = 1; port <= 21; port += 1) if (!ports.has(port)) return port;
+    return 1;
+  })();
+
+  const form = (port: number) => (
+    <AssignDevice
+      initialPort={port}
+      reportedType={ports.get(port)?.actual?.rawType ?? null}
+      declaredPorts={declaredPorts}
+      takenNames={takenNames}
+      onAssign={(declaration) => {
+        onAssign?.(declaration);
+        setAssigning(null);
+      }}
+      onCancel={() => setAssigning(null)}
+    />
+  );
+
   if (rows.length === 0) {
-    return <p className="text-sm text-ink-dim">No devices declared yet.</p>;
+    return (
+      <div>
+        <p className="text-sm text-ink-dim">No devices declared yet.</p>
+        {onAssign &&
+          (assigning === null ? (
+            <button
+              type="button"
+              onClick={() => setAssigning(firstFreePort)}
+              className="mt-2 rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+            >
+              Declare a device…
+            </button>
+          ) : (
+            form(assigning)
+          ))}
+      </div>
+    );
   }
 
   return (
-    <ul className="space-y-0.5">
-      {rows.map(([port, entry]) => {
-        const mismatch =
-          connected &&
-          entry.declared &&
-          (!entry.actual || !sameKind(entry.actual.type, entry.declared.type));
-        const unexpected = connected && entry.actual && !entry.declared;
+    <div>
+      <ul className="space-y-0.5">
+        {rows.map(([port, entry]) => {
+          const mismatch =
+            connected &&
+            entry.declared &&
+            (!entry.actual || !sameKind(entry.actual.type, entry.declared.type));
+          const unexpected = connected && entry.actual && !entry.declared;
 
-        return (
-          <li
-            key={port}
-            className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px] ${
-              mismatch ? 'bg-vex/8' : ''
-            }`}
-          >
-            <span className="w-7 shrink-0 font-mono text-ink-dim">{port}</span>
-
-            {entry.declared ? (
-              <button
-                type="button"
-                onClick={() => onJump(entry.declared!.file, entry.declared!.line)}
-                className="flex-1 truncate text-left transition hover:text-vex"
-                title={`${entry.declared.file}:${entry.declared.line}`}
-              >
-                {entry.declared.name}
-                <span className="ml-1 text-ink-dim">{entry.declared.type}</span>
-              </button>
-            ) : (
-              <span className="flex-1 truncate text-ink-dim">
-                {unexpected ? `${entry.actual!.type} (not in code)` : '—'}
-              </span>
-            )}
-
-            {connected && (
-              <span
-                className={`shrink-0 text-[10px] ${
-                  mismatch ? 'text-vex' : entry.actual ? 'text-ok' : 'text-ink-dim'
+          return (
+            <li key={port}>
+              <div
+                className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px] ${
+                  mismatch ? 'bg-vex/8' : ''
                 }`}
-                title={
-                  mismatch
-                    ? entry.actual
-                      ? `Brain reports ${entry.actual.type}`
-                      : 'Brain reports nothing on this port'
-                    : undefined
-                }
               >
-                {mismatch ? (entry.actual ? 'wrong type' : 'missing') : entry.actual ? 'ok' : ''}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+                <span className="w-7 shrink-0 font-mono text-ink-dim">{port}</span>
+
+                {entry.declared ? (
+                  <button
+                    type="button"
+                    onClick={() => onJump(entry.declared!.file, entry.declared!.line)}
+                    className="flex-1 truncate text-left transition hover:text-vex"
+                    title={`${entry.declared.file}:${entry.declared.line}`}
+                  >
+                    {entry.declared.name}
+                    <span className="ml-1 text-ink-dim">{entry.declared.type}</span>
+                  </button>
+                ) : (
+                  <span className="flex-1 truncate text-ink-dim">
+                    {unexpected ? `${entry.actual!.type} (not in code)` : '—'}
+                  </span>
+                )}
+
+                {/* Assigning is offered exactly where it helps: hardware the
+                    brain can see that the code has no name for. */}
+                {onAssign && !entry.declared && entry.actual && assigning !== port && (
+                  <button
+                    type="button"
+                    onClick={() => setAssigning(port)}
+                    className="shrink-0 rounded bg-panel px-1.5 py-0.5 text-[10px] font-medium transition hover:bg-edge hover:text-vex"
+                  >
+                    Assign
+                  </button>
+                )}
+
+                {connected && (
+                  <span
+                    className={`shrink-0 text-[10px] ${
+                      mismatch ? 'text-vex' : entry.actual ? 'text-ok' : 'text-ink-dim'
+                    }`}
+                    title={
+                      mismatch
+                        ? entry.actual
+                          ? `Brain reports ${entry.actual.type}`
+                          : 'Brain reports nothing on this port'
+                        : undefined
+                    }
+                  >
+                    {mismatch ? (entry.actual ? 'wrong type' : 'missing') : entry.actual ? 'ok' : ''}
+                  </span>
+                )}
+              </div>
+
+              {assigning === port && form(port)}
+            </li>
+          );
+        })}
+      </ul>
+
+      {onAssign && assigning === null && (
+        <button
+          type="button"
+          onClick={() => setAssigning(firstFreePort)}
+          className="mt-1.5 rounded-md bg-panel px-2.5 py-1 text-[11px] text-ink-dim transition hover:bg-edge hover:text-ink"
+        >
+          Declare a device on another port…
+        </button>
+      )}
+
+      {onAssign && assigning !== null && !ports.has(assigning) && form(assigning)}
+    </div>
   );
 }

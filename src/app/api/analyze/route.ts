@@ -19,11 +19,14 @@ import ast, json, sys
 payload = json.loads(sys.stdin.read())
 files = payload.get("files", [])
 
+# Class names exactly as VEXcode V5 Python spells them. Three of these were
+# wrong (GPS, LineSensor, LightSensor) and Servo was missing, so a project
+# using them had its devices silently ignored by the port map.
 DEVICE_CLASSES = {
-    "Motor", "MotorGroup", "Inertial", "Distance", "Optical", "Rotation",
-    "Vision", "GPS", "Bumper", "Limit", "Encoder", "Sonar", "Pneumatic",
-    "AddressableLed", "Electromagnet", "Touchled", "Gyro", "Accelerometer",
-    "Potentiometer", "LineSensor", "LightSensor",
+    "Motor", "MotorGroup", "DriveTrain", "SmartDrive", "Inertial", "Distance",
+    "Optical", "Rotation", "Vision", "Gps", "Electromagnet", "AddressableLed",
+    "Bumper", "Limit", "Encoder", "Sonar", "Pneumatic", "Servo",
+    "Potentiometer", "Line", "Light", "Touchled", "Gyro", "Accelerometer",
 }
 BLOCKING_CALLS = {"wait", "sleep", "spin_for", "drive_for", "turn_for", "spin_to_position"}
 

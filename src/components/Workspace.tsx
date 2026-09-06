@@ -8,7 +8,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCollab } from '@/lib/collab/useCollab';
 import { rememberRoom } from '@/lib/collab/recent';
-import { applyIncomingFiles, readAllFiles, readFile } from '@/lib/collab/project';
+import { applyIncomingFiles, insertDeclaration, readAllFiles, readFile } from '@/lib/collab/project';
 import { useAnalysis } from '@/lib/editor/useAnalysis';
 import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
@@ -87,6 +87,30 @@ export function Workspace({
       if (line) setReveal({ line, nonce: Date.now() });
     },
     [openFile],
+  );
+
+  /**
+   * Writes a device declaration from the port map into the project. It joins
+   * the other declarations wherever they already live, rather than always
+   * landing in main.py — a project that keeps its hardware in robot_config.py
+   * should stay that way.
+   */
+  const assignDevice = useCallback(
+    (declaration: string) => {
+      if (!doc) return;
+      const withDevices = analysis.devices.at(-1)?.file;
+      // Falls back through main.py to any Python file at all, so a room whose
+      // main.py was renamed or deleted still gets the declaration somewhere
+      // instead of silently dropping it.
+      const target =
+        (withDevices && paths.includes(withDevices) ? withDevices : null) ??
+        (paths.includes(PROGRAM_FILE) ? PROGRAM_FILE : null) ??
+        paths.find((path) => path.endsWith('.py'));
+      if (!target) return;
+      const line = insertDeclaration(doc, target, declaration);
+      if (line != null) jumpTo(target, line);
+    },
+    [doc, analysis.devices, paths, jumpTo],
   );
 
   const closeTab = useCallback(
@@ -446,6 +470,7 @@ export function Workspace({
             findings={analysis.warnings}
             telemetry={series}
             onJump={jumpTo}
+            onAssignDevice={doc ? assignDevice : undefined}
           />
           </div>
 

@@ -27,6 +27,8 @@ interface Props {
   /** Live values parsed out of the program's printed output. */
   telemetry: Map<string, Series>;
   onJump: (file: string, line: number) => void;
+  /** Writes a device declaration into the project, from the port map. */
+  onAssignDevice?: (declaration: string) => void;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -59,6 +61,7 @@ export function BrainPanel({
   findings,
   telemetry,
   onJump,
+  onAssignDevice,
 }: Props) {
   const [slot, setSlot] = useState<SlotNumber>(1);
   const [programName, setProgramName] = useState('VEXCollab');
@@ -290,6 +293,7 @@ export function BrainPanel({
           actual={snapshot.devices}
           connected={connected}
           onJump={onJump}
+          onAssign={onAssignDevice}
         />
         {connected && declaredDevices.length > 0 && (
           <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">

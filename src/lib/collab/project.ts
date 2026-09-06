@@ -91,3 +91,56 @@ export function applyIncomingFiles(doc: Y.Doc, incoming: { path: string; content
 export function readFile(doc: Y.Doc, path: string): string {
   return getFiles(doc).get(path)?.toString() ?? '';
 }
+
+/** A module-level `name = Class(...)` — what a device declaration looks like. */
+const DECLARATION = /^[A-Za-z_]\w*\s*=\s*[A-Z]\w*\s*\(/;
+const IMPORT = /^\s*(from\s+\S+\s+import\b|import\s+\S+)/;
+
+/**
+ * Puts a device declaration where a person would have typed it: under the
+ * other declarations if the file has any, otherwise under the imports,
+ * otherwise at the top. Returns the 1-based line it landed on, so the caller
+ * can scroll there.
+ *
+ * Only module-level declarations count as anchors — an indented
+ * `motor = Motor(...)` inside a function is somebody's local variable, and
+ * appending a global next to it would put it out of scope.
+ */
+export function insertDeclaration(doc: Y.Doc, path: string, declaration: string): number | null {
+  const text = getFiles(doc).get(path);
+  if (!text) return null;
+
+  const source = text.toString();
+  const lines = source.split('\n');
+
+  let anchor = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (DECLARATION.test(lines[i])) anchor = i;
+  }
+  if (anchor === -1) {
+    for (let i = 0; i < lines.length; i += 1) {
+      if (IMPORT.test(lines[i])) anchor = i;
+    }
+  }
+
+  const at = anchor + 1;
+
+  doc.transact(() => {
+    if (at >= lines.length) {
+      const prefix = source.length === 0 || source.endsWith('\n') ? '' : '\n';
+      text.insert(source.length, `${prefix}${declaration}\n`);
+      return;
+    }
+
+    let offset = 0;
+    for (let i = 0; i < at; i += 1) offset += lines[i].length + 1;
+
+    // Keep a blank line between the new declaration and whatever follows,
+    // unless what follows is another declaration it belongs beside.
+    const next = lines[at];
+    const suffix = next.trim() !== '' && !DECLARATION.test(next) ? '\n\n' : '\n';
+    text.insert(offset, `${declaration}${suffix}`);
+  });
+
+  return at + 1;
+}

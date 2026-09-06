@@ -68,6 +68,9 @@ files into your own editor.
   a `wait()`, plus Python syntax checks and autocomplete.
 - **Templates:** Starter, Blank, Competition, Drivetrain, Vision sensor, and GPS sensor.
 - **Project search:** find text across every file and jump to the result.
+- **Port map with device assigning:** see what your code declares beside what the
+  brain actually reports, and turn a detected sensor into a declaration —
+  `rotation_4 = Rotation(Ports.PORT4)` — without typing the port number twice.
 - **Robot tools:** compiled program upload, run/stop controls, terminal output,
   telemetry graphs, and brain information.
 - **Personal settings:** editor themes, fonts, and optional GitHub Copilot.
