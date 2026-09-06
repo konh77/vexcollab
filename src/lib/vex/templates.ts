@@ -62,8 +62,16 @@ main()
 
 def arcade(left_motor, right_motor, forward, turn):
     """Both arguments are -100..100."""
-    left_motor.spin(FORWARD, forward + turn, PERCENT)
-    right_motor.spin(FORWARD, forward - turn, PERCENT)
+    left = forward + turn
+    right = forward - turn
+
+    # A stick in a corner asks for up to 200%, and the brain answers by
+    # clipping each motor on its own -- which silently changes the ratio
+    # between the two, so the robot stops turning by the amount you asked for.
+    # Scaling both sides down together keeps the ratio, and so keeps the turn.
+    largest = max(abs(left), abs(right), 100)
+    left_motor.spin(FORWARD, left * 100 / largest, PERCENT)
+    right_motor.spin(FORWARD, right * 100 / largest, PERCENT)
 `,
       },
       { path: 'README.md', contents: README('VEXCollab project', 'Arcade drive, split into two files.') },
@@ -144,8 +152,16 @@ pre_autonomous()
 
 def arcade(left_motor, right_motor, forward, turn):
     """Both arguments are -100..100."""
-    left_motor.spin(FORWARD, forward + turn, PERCENT)
-    right_motor.spin(FORWARD, forward - turn, PERCENT)
+    left = forward + turn
+    right = forward - turn
+
+    # A stick in a corner asks for up to 200%, and the brain answers by
+    # clipping each motor on its own -- which silently changes the ratio
+    # between the two, so the robot stops turning by the amount you asked for.
+    # Scaling both sides down together keeps the ratio, and so keeps the turn.
+    largest = max(abs(left), abs(right), 100)
+    left_motor.spin(FORWARD, left * 100 / largest, PERCENT)
+    right_motor.spin(FORWARD, right * 100 / largest, PERCENT)
 
 
 def drive_forward(millimetres):
@@ -157,14 +173,30 @@ def drive_forward(millimetres):
     right_drive.stop()
 
 
-def turn_to(heading):
-    """Turn until the inertial sensor reads the heading you asked for."""
-    while abs(inertial.heading(DEGREES) - heading) > 2:
-        error = heading - inertial.heading(DEGREES)
+def turn_to(heading, timeout_msec=3000):
+    """Turn to a field heading, the short way round."""
+    elapsed = 0
+    while elapsed < timeout_msec:
+        # heading() reads 0..360, so a plain subtraction can claim "260 to the
+        # left" when the answer is "100 to the right". Wrapping into -180..180
+        # first is what makes this take the shorter way.
+        error = (heading - inertial.heading(DEGREES) + 180) % 360 - 180
+        if abs(error) <= 2:
+            break
+
         speed = max(-30, min(30, error))
+        # Proportional speed alone shrinks to nothing near the target and the
+        # robot stalls just short of it, so hold a floor a motor can act on.
+        if abs(speed) < 8:
+            speed = 8 if speed > 0 else -8
+
         left_drive.spin(FORWARD, speed, PERCENT)
         right_drive.spin(REVERSE, speed, PERCENT)
         wait(20, MSEC)
+        elapsed += 20
+
+    # Always stops, even on timeout: an autonomous routine that can spin
+    # forever because the sensor drifted is worse than one that gives up.
     left_drive.stop()
     right_drive.stop()
 `,

@@ -1,50 +1,12 @@
 /*
  * VEXCollab - turning an editor project into something the brain can store.
  * Licensed under AGPL-3.0-only.
+ *
+ * The starter files used to be duplicated here as well as in templates.ts.
+ * They are not any more: one copy, in templates.ts, which is the only thing
+ * that reads them. Two copies of the same Python is how a fix lands in the
+ * one nobody opens.
  */
-
-/** The V5 brain runs Python on-board, so "building" is just encoding text. */
-export function pythonPayload(source: string): Uint8Array {
-  // A trailing newline keeps the on-brain parser happy with the last statement.
-  const normalized = source.endsWith('\n') ? source : `${source}\n`;
-  return new TextEncoder().encode(normalized);
-}
-
-export const STARTER_MAIN_PY = `# ---------------------------------------------------------------------------
-#
-#   Project:      VEXCollab starter
-#   Description:  Edit me with your team, then upload straight from the browser.
-#
-# ---------------------------------------------------------------------------
-from vex import *
-
-brain = Brain()
-controller = Controller(PRIMARY)
-
-left_drive = Motor(Ports.PORT1, GearSetting.RATIO_18_1, False)
-right_drive = Motor(Ports.PORT10, GearSetting.RATIO_18_1, True)
-
-
-def main():
-    brain.screen.print("Hello from VEXCollab")
-    while True:
-        # arcade() lives in lib/drive.py and is bundled in automatically.
-        arcade(left_drive, right_drive,
-               controller.axis3.position(), controller.axis1.position())
-        wait(20, MSEC)
-
-
-main()
-`;
-
-export const STARTER_README_MD = `# VEXCollab project
-
-Everyone with this room's link edits these files at the same time.
-
-- \`main.py\` is what gets uploaded to the brain.
-- Connect a V5 over USB in the **Brain** panel, pick a slot, and hit Upload.
-- Anything your program prints shows up in the **Terminal** tab.
-`;
 
 export interface ProjectFile {
   path: string;
@@ -104,28 +66,6 @@ export function bundlePythonProject(
 /** How many .py files a bundle will pull in, for showing in the UI. */
 export function countProgramFiles(files: ReadonlyArray<{ path: string }>): number {
   return files.filter((f) => f.path.endsWith('.py')).length;
-}
-
-export interface StarterFile {
-  path: string;
-  contents: string;
-}
-
-export const STARTER_DRIVE_PY = `# Anything in a .py file here is bundled into the program ahead of main.py,
-# so these functions are callable from main.py with no import line.
-
-def arcade(left_motor, right_motor, forward, turn):
-    \"\"\"Both arguments are -100..100.\"\"\"
-    left_motor.spin(FORWARD, forward + turn, PERCENT)
-    right_motor.spin(FORWARD, forward - turn, PERCENT)
-`;
-
-export function starterProject(): StarterFile[] {
-  return [
-    { path: 'main.py', contents: STARTER_MAIN_PY },
-    { path: 'lib/drive.py', contents: STARTER_DRIVE_PY },
-    { path: 'README.md', contents: STARTER_README_MD },
-  ];
 }
 
 export function languageForPath(path: string): string {
