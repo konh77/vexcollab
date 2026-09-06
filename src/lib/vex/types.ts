@@ -10,6 +10,12 @@ export interface SmartDeviceView {
   port: number;
   type: string;
   version: string;
+  /**
+   * The numeric SmartDeviceType behind `type`. Kept because it is the only
+   * lossless identifier — mapping a device back to the Python class you would
+   * declare for it has to key off the number, not off a display name.
+   */
+  rawType: number;
 }
 
 export interface BrainFile {
@@ -79,9 +85,16 @@ export interface UploadRequest {
   coldPayload?: Uint8Array;
   /**
    * Which file vendor the program is written under. The library only ever uses
-   * USER, which is where compiled ARM code lives. The protocol also defines
-   * VEXVM (64), which is a plausible home for programs the on-board Python VM
-   * runs — untested, and exposed so it can be tried against real hardware.
+   * USER (1), which is where compiled ARM code lives.
+   *
+   * PROS's vendor map is `user 1, system 15, rms 16, pros 24, mw 32` — so the
+   * vendored enum's DEV1/DEV2/DEV3 are per-IDE slots (Robot Mesh Studio, PROS,
+   * MathWorks), and a third-party toolchain puts its *linked library* under
+   * its own vendor while the program itself stays USER. That is what these
+   * values are for.
+   *
+   * VEXVM (64) appears in no such map and was rejected by real hardware when
+   * it was tried as a home for Python source. Kept only as an escape hatch.
    */
   vendor?: number;
 }

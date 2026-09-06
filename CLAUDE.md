@@ -69,6 +69,18 @@ not). Keep `NOTICE` current when adding third-party code.
 - **Yjs update echo.** `CollabProvider` passes itself as the transaction origin
   for network-applied updates and skips re-broadcasting those. Dropping that check
   creates an infinite loop between peers.
+- **A V5 will not answer a port that has just opened.** Measured on real
+  hardware: a probe at 0 ms gets nothing, one at 200 ms replies in 2 ms. The
+  vendored `V5SerialDevice.connect()` probes with `query1` on a *100 ms*
+  timeout, inside that window, so it never connects — `V5Session` opens the
+  port, settles it, and hands the awake connection to the library instead.
+  Do not "simplify" that back to `device.connect()`.
+- **One request, one reply — and replies are matched by command id.** Two
+  overlapping calls get handed each other's answers, and a timeout pops the
+  head of the callback queue whether or not that is the request that timed out.
+  Everything in `V5Session` goes through `exclusive()` for that reason; a call
+  that adds a new brain operation must too, and must call the `*Locked`
+  variants internally or it will deadlock on its own chain.
 - **WebSerial is Chromium-only and needs a user gesture.** `navigator.serial`
   is undefined in Safari/Firefox; `V5Session` reports `connectionState:
   'unsupported'` and the panel degrades. Keep that path working.

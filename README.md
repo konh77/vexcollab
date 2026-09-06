@@ -91,6 +91,7 @@ Ctrl/⌘ + S does **not** save a room to GitHub. Use **Save session to GitHub**.
 | --- | --- |
 | USB is unavailable | Use desktop Chrome or Edge, and open [vex.konh.org](https://vex.konh.org) or `localhost`. Plain HTTP Wi-Fi addresses cannot use Web Serial. |
 | The brain is missing from the port picker | Check that the brain is on, use a USB data cable, and close other apps using the serial port. |
+| Connecting says the brain never answered | Something else is holding the port — close VEXcode and any other VEXCollab tab, then unplug and replug the cable. |
 | No program output | Open the terminal's **user port** separately, then run a program that prints output. |
 | Upload asks for a `.bin` | Compile the program in VEXcode first; a Python source file is not an uploadable program. |
 | A room is full or the server is busy | Follow the displayed capacity message and try again when space is available. |

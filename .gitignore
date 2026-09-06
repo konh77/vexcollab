@@ -22,3 +22,9 @@ konh-site/
 konh.org-static*
 /site/
 /www/
+
+# VEX Robotics' own installers and unpacked software. Proprietary: its licence
+# forbids redistribution as well as reverse engineering, so a copy sitting in
+# the working tree must never reach this public repo.
+*.exe
+VEXcode*/
