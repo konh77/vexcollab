@@ -208,3 +208,24 @@ communication uses [v5-serial-protocol](https://github.com/Jerrylum/v5-serial-pr
 
 VEXCollab is unofficial and is not affiliated with or endorsed by VEX Robotics.
 It does not include VEX Robotics' proprietary software.
+
+<!-- konh-links:start -->
+
+---
+
+## More from konh
+
+| Project | | Live |
+| --- | --- | --- |
+| **[千分の一の国](https://github.com/konh77/senbunpy)** | Japan simulated at one-thousandth scale, with a small language for writing its laws | [senbun.konh.org](https://senbun.konh.org) |
+| **[Lens & Locations](https://github.com/konh77/lens-and-location)** | A photo magazine | [lens.konh.org](https://lens.konh.org) |
+| **[Skin to Litematica](https://github.com/konh77/skin-to-litematica)** | Minecraft skins converted into buildable block sculptures | [konh.org/skin-to-litematica](https://konh.org/skin-to-litematica/) |
+| **[Water Game](https://github.com/konh77/sciencegame)** | A management game about pumping, cleaning and selling water, written with Pyxel | — |
+| **[ManageBac MCP](https://github.com/konh77/managebac-mcp)** | An MCP server that lets AI agents read ManageBac | — |
+| **[Guardian](https://github.com/konh77/Guardian)** | A Go service — Gin HTTP server with OIDC | — |
+
+Everything else: **[github.com/konh77](https://github.com/konh77?tab=repositories)**
+
+Made by **konh** — [konh.org](https://konh.org)
+
+<!-- konh-links:end -->

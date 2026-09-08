@@ -45,7 +45,7 @@ for attempt in \$(seq 1 30); do
   sleep 10
 done
 
-curl -fsSL https://raw.githubusercontent.com/ponpon77/vexcollab/main/deploy/pi/install.sh \
+curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh \
   | bash -s -- "${VEXCOLLAB_DOMAIN}"
 
 mkdir -p /var/lib/vexcollab

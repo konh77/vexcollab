@@ -45,7 +45,7 @@ Flash with Imager as above (steps 1–3), boot the Pi, then:
 
 ```bash
 ssh <you>@vexcollab.local
-curl -fsSL https://raw.githubusercontent.com/ponpon77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- konh.org
+curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- konh.org
 ```
 
 Same result. Prefer this if Option A doesn't come up — the failure is visible
