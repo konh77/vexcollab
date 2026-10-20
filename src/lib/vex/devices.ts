@@ -43,6 +43,34 @@ export interface DeviceKind {
   /** Default for each option, keyed by option key. */
   defaults: Record<string, string>;
   note?: string;
+  /**
+   * Present for devices wired to the brain's eight 3-wire ports (A-H) rather
+   * than a numbered smart port. `pair` is for Encoder and Sonar, which need
+   * two adjacent letters and are declared against the first of them.
+   */
+  threeWire?: { pair: boolean };
+}
+
+/** The brain's 3-wire ports, in the order the Python API names them. */
+export const WIRE_LETTERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
+
+/** Where a device is plugged in: a smart port number, or a 3-wire letter. */
+export type Location = number | string;
+
+/**
+ * Every letter a declared 3-wire device occupies. A pair device claims the
+ * letter after the one it is declared on, so `Encoder(...a)` also uses B.
+ */
+export function wiresUsed(className: string, letter: string): string[] {
+  const start = WIRE_LETTERS.indexOf(letter as (typeof WIRE_LETTERS)[number]);
+  if (start === -1) return [];
+  const width = kindByClassName(className)?.threeWire?.pair ? 2 : 1;
+  return WIRE_LETTERS.slice(start, start + width);
+}
+
+/** Letters a device of this kind may be declared on. Pairs must start A, C, E or G. */
+export function wireChoices(kind: DeviceKind): string[] {
+  return WIRE_LETTERS.filter((_, i) => !kind.threeWire?.pair || i % 2 === 0);
 }
 
 const GEAR_CHOICES = [
@@ -57,10 +85,11 @@ const REVERSED_CHOICES = [
 ];
 
 /**
- * Everything that can be declared against a smart port. Three-wire devices
- * (Bumper, Limit, Sonar, Pneumatic…) are deliberately absent: they hang off
- * `brain.three_wire_port`, not a numbered port, so the brain never reports one
- * and there is no port here to assign them to.
+ * Everything that can be declared. Smart-port devices come first and the
+ * brain reports them, so they can be offered from what it sees. 3-wire devices
+ * hang off `brain.three_wire_port` and the brain reports nothing per letter,
+ * so those can only be declared by hand — they are never offered from a
+ * detected port.
  */
 export const DEVICE_KINDS: DeviceKind[] = [
   {
@@ -146,6 +175,99 @@ export const DEVICE_KINDS: DeviceKind[] = [
     options: [],
     defaults: {},
   },
+  {
+    className: 'Pneumatic',
+    label: 'Pneumatic solenoid',
+    stem: 'pneumatic',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+    note: 'open() extends the cylinder, close() retracts it.',
+  },
+  {
+    className: 'Bumper',
+    label: 'Bumper switch',
+    stem: 'bumper',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'Limit',
+    label: 'Limit switch',
+    stem: 'limit',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'Potentiometer',
+    label: 'Potentiometer',
+    stem: 'pot',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'Line',
+    label: 'Line tracker',
+    stem: 'line',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'Light',
+    label: 'Light sensor',
+    stem: 'light',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'Servo',
+    label: 'Servo',
+    stem: 'servo',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'AddressableLed',
+    label: 'Addressable LED strip',
+    stem: 'leds',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: false },
+  },
+  {
+    className: 'Encoder',
+    label: 'Quadrature encoder',
+    stem: 'encoder',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: true },
+    note: 'Uses two ports: this one and the next letter.',
+  },
+  {
+    className: 'Sonar',
+    label: 'Ultrasonic range finder',
+    stem: 'sonar',
+    reportedAs: [],
+    options: [],
+    defaults: {},
+    threeWire: { pair: true },
+    note: 'Uses two ports: this one and the next letter.',
+  },
 ];
 
 export function kindByClassName(className: string): DeviceKind | undefined {
@@ -180,9 +302,9 @@ export function nameProblem(name: string, taken: string[]): string | null {
   return null;
 }
 
-/** A free variable name for this kind of device on this port. */
-export function suggestName(kind: DeviceKind, port: number, taken: string[]): string {
-  const base = `${kind.stem}_${port}`;
+/** A free variable name for this kind of device in this place. */
+export function suggestName(kind: DeviceKind, location: Location, taken: string[]): string {
+  const base = `${kind.stem}_${location}`;
   if (!taken.includes(base)) return base;
   for (let n = 2; n < 100; n += 1) {
     if (!taken.includes(`${base}_${n}`)) return `${base}_${n}`;
@@ -201,10 +323,14 @@ export function suggestName(kind: DeviceKind, port: number, taken: string[]): st
 export function declarationFor(
   kind: DeviceKind,
   name: string,
-  port: number,
+  location: Location,
   values: Record<string, string>,
 ): string {
-  const args = [`Ports.PORT${port}`];
+  const args = [
+    typeof location === 'number'
+      ? `Ports.PORT${location}`
+      : `brain.three_wire_port.${location}`,
+  ];
   for (const option of kind.options) {
     const raw = (values[option.key] ?? kind.defaults[option.key] ?? '').trim();
     // A number field left empty falls back to the default rather than

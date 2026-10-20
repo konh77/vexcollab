@@ -108,7 +108,18 @@ export function Workspace({
         paths.find((path) => path.endsWith('.py'));
       if (!target) return;
 
-      const line = insertDeclaration(doc, target, declaration);
+      // A 3-wire device hangs off the Brain object, so its line only works if
+      // the project has one — under whatever name it was given.
+      let text = declaration;
+      if (declaration.includes('.three_wire_port.')) {
+        const owner = readAllFiles(doc)
+          .map((file) => /^([A-Za-z_]\w*)\s*=\s*Brain\s*\(/m.exec(file.contents)?.[1])
+          .find(Boolean);
+        if (owner) text = declaration.replace('brain.three_wire_port', `${owner}.three_wire_port`);
+        else insertDeclaration(doc, target, 'brain = Brain()');
+      }
+
+      const line = insertDeclaration(doc, target, text);
       if (line != null) jumpTo(target, line);
     },
     [doc, analysis.devices, paths, jumpTo],

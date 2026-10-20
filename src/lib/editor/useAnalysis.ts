@@ -10,6 +10,8 @@ export interface DeclaredDevice {
   name: string;
   type: string;
   port: number | null;
+  /** 3-wire letter ("a"–"h") for devices on `brain.three_wire_port`, else null. */
+  wire: string | null;
   file: string;
   line: number;
 }

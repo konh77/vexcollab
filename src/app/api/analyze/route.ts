@@ -28,6 +28,11 @@ DEVICE_CLASSES = {
     "Bumper", "Limit", "Encoder", "Sonar", "Pneumatic", "Servo",
     "Potentiometer", "Line", "Light", "Touchled", "Gyro", "Accelerometer",
 }
+# These two need an adjacent pair of 3-wire ports (A-B, C-D, E-F, G-H), and are
+# declared against the first letter, so Encoder(brain.three_wire_port.a) is
+# using B as well.
+WIRE_PAIR_CLASSES = {"Encoder", "Sonar"}
+WIRE_LETTERS = "abcdefgh"
 BLOCKING_CALLS = {"wait", "sleep", "spin_for", "drive_for", "turn_for", "spin_to_position"}
 
 devices, warnings, functions, edges = [], [], [], []
@@ -40,6 +45,15 @@ def port_of(node):
                 return int(arg.attr[4:])
             except ValueError:
                 return None
+    return None
+
+def wire_of(node):
+    """brain.three_wire_port.a -> "a" (any variable name for the brain)"""
+    for arg in node.args:
+        if (isinstance(arg, ast.Attribute) and arg.attr in tuple(WIRE_LETTERS)
+                and isinstance(arg.value, ast.Attribute)
+                and arg.value.attr == "three_wire_port"):
+            return arg.attr
     return None
 
 def has_blocking_call(node):
@@ -74,6 +88,7 @@ for entry in files:
                     "name": getattr(target, "id", "?"),
                     "type": cls,
                     "port": port_of(node.value),
+                    "wire": wire_of(node.value),
                     "file": path,
                     "line": node.lineno,
                 })
@@ -115,6 +130,33 @@ for port, group in sorted(by_port.items()):
             "severity": "error", "message": "Port %d does not exist — the V5 has 1 to 21" % port,
         })
 
+# 3-wire letters: two devices on one letter, or a pair straddling a neighbour
+by_wire = {}
+for d in devices:
+    letter = d.get("wire")
+    if letter is None:
+        continue
+    start = WIRE_LETTERS.index(letter)
+    width = 2 if d["type"] in WIRE_PAIR_CLASSES else 1
+    if width == 2 and start % 2 == 1:
+        warnings.append({
+            "file": d["file"], "line": d["line"], "rule": "wire-pair",
+            "severity": "error",
+            "message": "%s uses two ports and must start on A, C, E or G, not %s"
+                       % (d["type"], letter.upper()),
+        })
+    for offset in range(width):
+        if start + offset < len(WIRE_LETTERS):
+            by_wire.setdefault(WIRE_LETTERS[start + offset], []).append(d)
+for letter, group in sorted(by_wire.items()):
+    if len({id(g) for g in group}) > 1:
+        warnings.append({
+            "file": group[1]["file"], "line": group[1]["line"], "rule": "wire-conflict",
+            "severity": "error",
+            "message": "3-wire port %s is claimed by %s"
+                       % (letter.upper(), " and ".join(g["name"] for g in group)),
+        })
+
 # names defined in more than one file collide once bundled
 seen = {}
 for f in functions:
@@ -130,7 +172,8 @@ for name, group in seen.items():
 
 defined = {f["name"] for f in functions}
 print(json.dumps({
-    "devices": sorted(devices, key=lambda d: (d["port"] is None, d["port"] or 0)),
+    "devices": sorted(devices, key=lambda d: (
+        d["port"] is None, d["port"] or 0, d.get("wire") or "")),
     "warnings": warnings,
     "functions": functions,
     "edges": [e for e in edges if e["to"] in defined],
