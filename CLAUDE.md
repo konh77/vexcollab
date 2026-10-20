@@ -28,6 +28,7 @@ on the same room URL.
 | `server.mjs` | Next + Socket.IO relay. Owns the authoritative `Y.Doc` per room, in memory. |
 | `src/lib/collab/` | Client half of collaboration: `CollabProvider`, identity, the shared file model. |
 | `src/lib/vex/` | Everything V5: `session.ts` (observable brain store), `terminal.ts` (user serial port), `screen.ts` (framebuffer), `program.ts` (payload + starter files). |
+| `pinned-rooms.mjs` | Pinned rooms: rooms that never close, with a passcode and Git autosave. Generic; the rooms themselves are declared in a config file on the server, never in this repo. |
 | `src/lib/v5-serial-protocol/` | **Vendored third-party code. Do not edit.** |
 | `src/components/` | UI. `Workspace` is the shell; `BrainPanel` is the right rail; `EditorPane` is Monaco + Yjs. |
 

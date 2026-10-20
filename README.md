@@ -82,12 +82,23 @@ files into your own editor.
   a `wait()`, plus Python syntax checks and autocomplete.
 - **Templates:** Starter, Blank, Competition, Drivetrain, Vision sensor, and GPS sensor.
 - **Project search:** find text across every file and jump to the result.
+- **Team chat:** talk to everyone in the room from the Chat tab. Messages are
+  plain text with clickable web links, an unread count shows while it is closed,
+  and an ordinary room forgets them when it closes.
+- **Help and cheat sheets:** search every command, see what each argument takes,
+  and drop an example — written with your own variable names — into the code.
+  Eleven short recipes cover driving, turning, autonomous, sensors and the
+  mistakes people hit most. Cmd/Ctrl + / opens it.
+- **Phones and tablets:** one screen at a time with a bottom bar on a phone, the
+  file list beside the editor on an iPad. An iPhone or iPad cannot connect a
+  brain — Apple allows no iOS browser to reach USB — but everything else works.
 - **Port map with device assigning:** see what your code declares beside what the
   brain actually reports, and turn a detected sensor into a declaration —
   `rotation_4 = Rotation(Ports.PORT4)` — without typing the port number twice.
 - **Robot tools:** compiled program upload, run/stop controls, terminal output,
   telemetry graphs, and brain information.
-- **Personal settings:** editor themes, fonts, and optional GitHub Copilot.
+- **Personal settings:** editor themes, fonts, and optional GitHub Copilot
+  suggestions in the editor.
 
 ### Keyboard shortcuts
 
@@ -99,6 +110,7 @@ Use **Ctrl** on Windows/Linux or **⌘** on macOS.
 | Open command palette | Ctrl/⌘ + K |
 | Show or hide terminal | Ctrl/⌘ + J |
 | Open settings | Ctrl/⌘ + , |
+| Open help and cheat sheets | Ctrl/⌘ + / |
 
 Ctrl/⌘ + S does **not** save a room to GitHub. Use **Save session to GitHub**.
 
@@ -236,6 +248,49 @@ Public-mode capacity defaults:
 
 Live room documents are held in memory. GitHub checkouts and integration data
 may be stored on the server; saving a room to GitHub commits and pushes its files.
+
+### Pinned rooms
+
+A pinned room is for a team's own long-lived workspace. It never closes — not
+when everyone leaves, not when idle, not across a server restart — it needs a
+passcode, keeps its chat, and commits itself to a Git repository.
+
+Rooms are declared in a JSON file on the server, **not** in this repository, so
+a passcode or token never has to be committed. The server reads
+`VEXCOLLAB_PINNED_FILE`, then `/etc/vexcollab/pinned-rooms.json`, then
+`pinned-rooms.json` in the data directory.
+
+```json
+{
+  "rooms": [
+    {
+      "id": "myroom",
+      "passcodeHash": "scrypt$…",
+      "repo": "owner/name",
+      "branch": "main",
+      "tokenFile": "/etc/vexcollab/myroom.token",
+      "author": { "name": "VEXCollab", "email": "vexcollab@localhost" }
+    }
+  ]
+}
+```
+
+- **Passcode.** Only a salted hash is stored. Make one with
+  `printf %s 'the passcode' | node scripts/hash-passcode.mjs`. It is checked on
+  the server, and wrong guesses are rate-limited per visitor.
+- **Token.** Put a GitHub token in `tokenFile` (a fine-grained token limited to
+  that one repository with *Contents: read and write* is enough). It is read by
+  the server only and never sent to a browser.
+- **Autosave.** Edits are committed and pushed after they go quiet (20 seconds by
+  default, at most two minutes), and the repository is checked every five minutes
+  for changes made elsewhere. It never force-pushes. If the room and the
+  repository changed the same file, that file is held — neither side is
+  overwritten — and the status bar says why until the two match again.
+- Optional: `debounceSeconds`, `maxDelaySeconds`, `pollSeconds`. Leave out
+  `repo` for a room that is only kept on the server.
+
+The server needs `git` and write access to its data directory. The room's state
+and working copy live under `<data dir>/pinned/<id>/`.
 
 </details>
 
