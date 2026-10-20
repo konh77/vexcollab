@@ -322,8 +322,7 @@ const GPS_MAIN = [
   '    brain.screen.print("GPS ready")',
   '',
   '    while True:',
-  '        # x, y and heading on one line: VEXCollab pairs them up and draws',
-  '        # the robot on a top-down field view.',
+  '        # x, y and heading on one line, so the terminal can chart each value.',
   '        print("x=%d y=%d heading=%d quality=%d" % (',
   '            gps.x_position(MM),',
   '            gps.y_position(MM),',
@@ -341,8 +340,7 @@ const GPS_README = [
   '# GPS sensor',
   '',
   'Prints field position every 100 ms. Open the user port in the terminal panel',
-  'and the field map in the Brain rail draws where the robot is, with a trail',
-  'behind it.',
+  'and each value is charted live.',
   '',
   'The field is 3.6 m square and the GPS reports millimetres from the centre, so',
   'values run about -1800 to 1800 on each axis.',
@@ -371,7 +369,7 @@ TEMPLATES.push(
   {
     id: 'gps',
     name: 'GPS sensor',
-    description: 'Print field position — VEXCollab draws it on a field map.',
+    description: 'Print field position and chart it live in the terminal.',
     files: [
       {
         path: 'main.py',

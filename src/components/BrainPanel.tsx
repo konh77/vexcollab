@@ -7,11 +7,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
 import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
-import { FieldMap } from './FieldMap';
 import { PortMap } from './PortMap';
 import { firmwareState } from '@/lib/vex/firmware';
 import type { V5Session } from '@/lib/vex/session';
-import type { Series } from '@/lib/vex/telemetry';
 import type { BrainFile, BrainSnapshot } from '@/lib/vex/types';
 import { findEmptySlot, inferProgramName, validateProgramFile } from '@/lib/vex/upload';
 import { isV5Bytecode } from '@/lib/vex/bytecode';
@@ -26,8 +24,6 @@ interface Props {
   programFileCount: number;
   declaredDevices: DeclaredDevice[];
   findings: Warning[];
-  /** Live values parsed out of the program's printed output. */
-  telemetry: Map<string, Series>;
   onJump: (file: string, line: number) => void;
   /** Writes a device declaration into the project, from the port map. */
   onAssignDevice?: (declaration: string) => void;
@@ -61,7 +57,6 @@ export function BrainPanel({
   programFileCount,
   declaredDevices,
   findings,
-  telemetry,
   onJump,
   onAssignDevice,
 }: Props) {
@@ -578,10 +573,6 @@ export function BrainPanel({
             </button>
           </details>
         </div>
-      </Section>
-
-      <Section title="Field position">
-        <FieldMap series={telemetry} />
       </Section>
 
       <Section title="Ports">

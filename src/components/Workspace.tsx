@@ -107,6 +107,7 @@ export function Workspace({
         (paths.includes(PROGRAM_FILE) ? PROGRAM_FILE : null) ??
         paths.find((path) => path.endsWith('.py'));
       if (!target) return;
+
       const line = insertDeclaration(doc, target, declaration);
       if (line != null) jumpTo(target, line);
     },
@@ -469,7 +470,6 @@ export function Workspace({
             programFileCount={programFileCount}
             declaredDevices={analysis.devices}
             findings={analysis.warnings}
-            telemetry={series}
             onJump={jumpTo}
             onAssignDevice={doc ? assignDevice : undefined}
           />
