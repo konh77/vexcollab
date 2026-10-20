@@ -8,10 +8,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
 import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
 import { PortMap } from './PortMap';
-import { firmwareState } from '@/lib/vex/firmware';
 import type { V5Session } from '@/lib/vex/session';
-import type { BrainFile, BrainSnapshot } from '@/lib/vex/types';
-import { findEmptySlot, inferProgramName, validateProgramFile } from '@/lib/vex/upload';
+import type { BrainSnapshot } from '@/lib/vex/types';
+import { findEmptySlot } from '@/lib/vex/upload';
 import { isV5Bytecode } from '@/lib/vex/bytecode';
 
 const SLOTS: SlotNumber[] = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -63,20 +62,12 @@ export function BrainPanel({
   const [slot, setSlot] = useState<SlotNumber | null>(null);
   const [programName, setProgramName] = useState('VEXCollab');
   const [description, setDescription] = useState('Uploaded from the browser');
-  const [binFile, setBinFile] = useState<File | null>(null);
-  const [uploadMode, setUploadMode] = useState<'editor' | 'file'>('editor');
   const [busyLabel, setBusyLabel] = useState('Working…');
   const [busy, setBusy] = useState(false);
   const [insecureContext, setInsecureContext] = useState(false);
-  const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
-  const [firmwareArmed, setFirmwareArmed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [brainFiles, setBrainFiles] = useState<BrainFile[]>([]);
-  const [filesLoaded, setFilesLoaded] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
   const slotChosen = useRef(false);
   const uploadInFlight = useRef(false);
 
@@ -104,21 +95,6 @@ export function BrainPanel({
   useEffect(() => {
     setInsecureContext(!window.isSecureContext);
   }, []);
-
-  useEffect(() => {
-    if (!connected) {
-      setLatestFirmware(null);
-      setFirmwareArmed(false);
-      return;
-    }
-    let cancelled = false;
-    void session.fetchLatestFirmware().then((version) => {
-      if (!cancelled) setLatestFirmware(version);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connected, session]);
 
   if (snapshot.connectionState === 'unsupported') {
     // The usual cause on a teammate's laptop is not the browser at all — it is
@@ -151,13 +127,7 @@ export function BrainPanel({
 
   const upload = async () => {
     if (slot === null || !connected || !snapshot.programsLoaded || operationBusy || uploadInFlight.current) return;
-    if (uploadMode === 'file' && !binFile) return;
-    if (uploadMode === 'editor' && !programFileCount) return;
-    const invalid = uploadMode === 'file' && binFile ? validateProgramFile(binFile) : null;
-    if (invalid) {
-      setBuildError(invalid);
-      return;
-    }
+    if (!programFileCount) return;
     if (!programName.trim()) {
       setBuildError('Give the program a name before uploading.');
       return;
@@ -167,17 +137,15 @@ export function BrainPanel({
     setBuildError(null);
     setUploadSuccess(null);
     try {
-      setBusyLabel(uploadMode === 'editor' ? 'Compiling…' : 'Reading file…');
-      const payload = uploadMode === 'editor'
-        ? await compileEditor()
-        : new Uint8Array(await binFile!.arrayBuffer());
+      setBusyLabel('Compiling…');
+      const payload = await compileEditor();
       setBusyLabel('Uploading…');
       const ok = await session.upload({
         slot,
         name: programName.trim(),
         description,
         payload,
-        ...(uploadMode === 'editor' ? { format: 'mpy' as const } : {}),
+        format: 'mpy' as const,
       });
       if (ok) {
         setUploadSuccess(`${programName.trim()} uploaded to slot ${slot}. Use Run below when you are ready.`);
@@ -230,19 +198,6 @@ export function BrainPanel({
     }
   };
 
-  const chooseProgram = (file: File | undefined) => {
-    if (!file || operationBusy) return;
-    setUploadSuccess(null);
-    const invalid = validateProgramFile(file);
-    setBuildError(invalid);
-    if (invalid) {
-      setBinFile(null);
-      return;
-    }
-    setBinFile(file);
-    setProgramName(inferProgramName(file.name));
-  };
-
   const exportPython = () => {
     const url = URL.createObjectURL(new Blob([getProgram()], { type: 'text/x-python;charset=utf-8' }));
     const link = document.createElement('a');
@@ -252,73 +207,8 @@ export function BrainPanel({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const updateFirmware = async () => {
-    setBusy(true);
-    setFirmwareArmed(false);
-    try {
-      await session.updateFirmware(latestFirmware ?? undefined);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-
   return (
     <div className="vc-scroll flex h-full flex-col gap-3 overflow-y-auto bg-panel p-2.5">
-      {connected && (
-        <button
-          type="button"
-          onClick={() => {
-            // A pasteable dump of everything the brain reported. Bug reports
-            // about hardware are useless without it, and reading two dozen
-            // fields aloud is worse.
-            const lines = [
-              'VEXCollab brain report',
-              `when            ${new Date().toISOString()}`,
-              `device          ${snapshot.isV5Controller ? 'V5 controller' : 'V5 brain'}`,
-              `name / team     ${snapshot.brainName ?? '-'} / ${snapshot.teamNumber ?? '-'}`,
-              `uniqueId        ${snapshot.uniqueId?.toString(16).toUpperCase() ?? '-'}`,
-              `vexOS           ${snapshot.systemVersion ?? '-'}`,
-              `cpu0 / cpu1     ${snapshot.cpu0Version ?? '-'} / ${snapshot.cpu1Version ?? '-'}`,
-              `battery         ${snapshot.batteryPercent ?? '-'}%${snapshot.isCharging ? ' charging' : ''}`,
-              `program         active=${snapshot.activeProgram} running=${snapshot.isRunningProgram}`,
-              `match mode      ${snapshot.matchMode ?? '-'}`,
-              `field control   ${snapshot.isFieldControllerConnected}`,
-              `button          pressed=${snapshot.button.pressed} double=${snapshot.button.doublePressed}`,
-              `screen          ${snapshot.screen.whiteTheme ? 'light' : 'dark'}${snapshot.screen.reversed ? ' reversed' : ''} lang=${snapshot.screen.language ?? '-'}`,
-              `radio           avail=${snapshot.radio.isAvailable} conn=${snapshot.radio.isConnected} vexnet=${snapshot.radio.isVexNet} data=${snapshot.radio.isRadioData} ch=${snapshot.radio.channel ?? '-'} latency=${snapshot.radio.latency ?? '-'}`,
-              '',
-              `devices (${snapshot.devices.length} shown of ${snapshot.rawDevices.length} reported)`,
-              ...snapshot.devices.map((d) => `  port ${d.port}  ${d.type}  v${d.version}`),
-              '',
-              'raw port entries from the brain',
-              ...snapshot.rawDevices.map((d) => `  port ${d.port}  type=${d.type}  v${d.version}`),
-              '',
-              `controllers (${snapshot.controllers.length})`,
-              ...snapshot.controllers.map(
-                (c) => `  ${c.isMaster ? 'primary' : 'partner'}  ${c.batteryPercent}%${c.isCharging ? ' charging' : ''}`,
-              ),
-              '',
-              `programs (${snapshot.programs.length})`,
-              ...snapshot.programs.map((p) => `  slot ${p.slot}  ${p.name}  ${p.size}B  ${p.binfile}`),
-              '',
-              `declared in code (${declaredDevices.length})`,
-              ...declaredDevices.map((d) => `  port ${d.port ?? '?'}  ${d.name}  ${d.type}`),
-              '',
-              `last error      ${snapshot.lastError ?? 'none'}`,
-            ];
-            void navigator.clipboard.writeText(lines.join('\n')).then(
-              () => setCopied(true),
-              () => setCopied(false),
-            );
-            window.setTimeout(() => setCopied(false), 2000);
-          }}
-          className="rounded-xl bg-panel-raised px-4 py-2.5 text-left text-[12px] shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition hover:bg-panel"
-        >
-          {copied ? 'Copied — paste it anywhere' : 'Copy a full brain report'}
-        </button>
-      )}
-
       <div className="flex items-center gap-2 rounded-xl bg-panel-raised px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
         <span
           className={`size-2 rounded-full ${connected ? 'bg-ok' : 'bg-ink-dim'}`}
@@ -391,69 +281,14 @@ export function BrainPanel({
 
       <Section title="Upload to brain">
         <div className="space-y-3 text-sm">
-          <div className="flex gap-1 rounded-lg bg-panel p-1" role="group" aria-label="Program source">
-            {(['editor', 'file'] as const).map(mode => (
-              <button type="button" key={mode} disabled={operationBusy} aria-pressed={uploadMode === mode}
-                onClick={() => { setUploadMode(mode); setBuildError(null); setUploadSuccess(null); }}
-                className={`flex-1 rounded-md px-2 py-1.5 text-xs transition disabled:opacity-50 ${uploadMode === mode ? 'bg-panel-raised text-ink shadow-sm' : 'text-ink-dim'}`}>
-                {mode === 'editor' ? 'Editor code' : 'Compiled file'}
-              </button>
-            ))}
+          <div className="space-y-2 text-[12px] leading-relaxed text-ink-dim">
+            <p>Compiles the current Python code and sends it straight to your Brain.</p>
+            <p>{programFileCount} Python {programFileCount === 1 ? 'file' : 'files'} · MicroPython 1.13</p>
+            <button type="button" onClick={downloadBuild} disabled={operationBusy || !programFileCount}
+              className="w-full rounded-lg border border-edge px-3 py-2 font-medium text-ink transition hover:bg-panel disabled:opacity-50">
+              Compile & download
+            </button>
           </div>
-          {uploadMode === 'editor' ? (
-            <div className="space-y-2 text-[12px] leading-relaxed text-ink-dim">
-              <p>Compile the current Python code and send it straight to your Brain. No file to choose.</p>
-              <p>{programFileCount} Python {programFileCount === 1 ? 'file' : 'files'} · MicroPython 1.13</p>
-              <button type="button" onClick={downloadBuild} disabled={operationBusy || !programFileCount}
-                className="w-full rounded-lg border border-edge px-3 py-2 font-medium text-ink transition hover:bg-panel disabled:opacity-50">
-                Compile & download
-              </button>
-            </div>
-          ) : <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              if (!operationBusy) setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              if (operationBusy) return;
-              if (event.dataTransfer.files.length > 1) {
-                setBuildError('Choose one compiled .bin file at a time.');
-                setUploadSuccess(null);
-                return;
-              }
-              chooseProgram(event.dataTransfer.files[0]);
-            }}
-            className={`rounded-lg border border-dashed px-3 py-3 transition ${
-              dragging ? 'border-vex bg-panel' : 'border-edge bg-panel'
-            }`}
-          >
-            <label htmlFor="brain-program-file" className="block text-[12px] font-medium">
-              {binFile ? binFile.name : 'Drop your .bin here, or browse'}
-            </label>
-            {binFile && (
-              <p className="mt-1 text-[11px] text-ink-dim">
-                {binFile.size < 1024
-                  ? `${binFile.size} bytes`
-                  : `${(binFile.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB`}
-                {' · Ready to upload'}
-              </p>
-            )}
-            <input
-              id="brain-program-file"
-              type="file"
-              accept=".bin"
-              disabled={operationBusy}
-              onChange={(event) => {
-                chooseProgram(event.target.files?.[0]);
-                // Selecting a rebuilt file with the same name must fire again.
-                event.target.value = '';
-              }}
-              className="mt-2 w-full text-[11px] disabled:opacity-50"
-            />
-          </div>}
 
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium text-ink-dim">Program name</span>
@@ -537,7 +372,7 @@ export function BrainPanel({
           <button
             type="button"
             onClick={() => connected ? void upload() : void session.connect()}
-            disabled={operationBusy || connecting || (connected && ((uploadMode === 'file' ? !binFile : !programFileCount) || slot === null || !programName.trim() || !snapshot.programsLoaded))}
+            disabled={operationBusy || connecting || (connected && (!programFileCount || slot === null || !programName.trim() || !snapshot.programsLoaded))}
             className="w-full rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
           >
             {operationBusy
@@ -546,15 +381,13 @@ export function BrainPanel({
                 ? 'Connecting…'
                 : !connected
                   ? 'Connect USB'
-                  : uploadMode === 'file' && !binFile
-                    ? 'Choose a .bin file'
-                    : slot === null
-                      ? 'Choose a slot'
-                      : `${uploadMode === 'editor' ? 'Compile & upload' : 'Upload'} to slot ${slot}`}
+                  : slot === null
+                    ? 'Choose a slot'
+                    : `Compile & upload to slot ${slot}`}
           </button>
           <p className="text-[11px] leading-relaxed text-ink-dim">
-            {uploadMode === 'editor' ? 'Rebuilds the current editor code on every upload. ' : ''}
-            Leaves the program stopped. Use Run below to start it.
+            Rebuilds the current editor code on every upload. Leaves the program stopped.
+            Use Run below to start it.
           </p>
 
           <details className="border-t border-edge pt-2 text-[11px] text-ink-dim">
@@ -648,68 +481,7 @@ export function BrainPanel({
               }
             />
             <Row label="vexOS" value={snapshot.systemVersion} />
-            <Row label="CPU0 / CPU1" value={`${snapshot.cpu0Version ?? '—'} / ${snapshot.cpu1Version ?? '—'}`} />
-            <Row label="Unique ID" value={snapshot.uniqueId?.toString(16).toUpperCase()} />
-            <Row
-              label="Screen"
-              value={`${snapshot.screen.whiteTheme ? 'Light' : 'Dark'}${
-                snapshot.screen.reversed ? ', reversed' : ''
-              }`}
-            />
-            {snapshot.screen.language && <Row label="Language" value={snapshot.screen.language} />}
-            <Row
-              label="Button"
-              value={
-                snapshot.button.doublePressed
-                  ? 'double-pressed'
-                  : snapshot.button.pressed
-                    ? 'pressed'
-                    : 'idle'
-              }
-            />
-            <Row
-              label="Field control"
-              value={snapshot.isFieldControllerConnected ? 'Connected' : 'None'}
-            />
-            <Row label="Match mode" value={snapshot.matchMode ?? '—'} />
           </Section>
-
-          {snapshot.radio.isAvailable && (
-            <Section title="Radio">
-              <Row label="Link" value={snapshot.radio.isConnected ? 'Connected' : 'Idle'} />
-              <Row label="Type" value={snapshot.radio.isVexNet ? 'VEXnet' : 'Bluetooth'} />
-              <Row label="Channel" value={snapshot.radio.channel} />
-              <Row label="Latency" value={snapshot.radio.latency != null ? `${snapshot.radio.latency} ms` : null} />
-              <Row label="Data link" value={snapshot.radio.isRadioData ? 'Active' : 'Idle'} />
-            </Section>
-          )}
-
-          <Section title={`Devices (${snapshot.devices.length})`}>
-            {snapshot.devices.length === 0 ? (
-              <p className="text-sm text-ink-dim">Nothing plugged into the smart ports.</p>
-            ) : (
-              <ul className="space-y-1 text-sm">
-                {snapshot.devices.map((device) => (
-                  <li key={device.port} className="flex justify-between gap-2">
-                    <span className="text-ink-dim">Port {device.port}</span>
-                    <span className="truncate font-medium">{device.type}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          {snapshot.controllers.length > 0 && (
-            <Section title="Controllers">
-              {snapshot.controllers.map((controller) => (
-                <Row
-                  key={controller.index}
-                  label={controller.isMaster ? 'Primary' : 'Partner'}
-                  value={`${controller.batteryPercent}%${controller.isCharging ? ' (charging)' : ''}`}
-                />
-              ))}
-            </Section>
-          )}
 
           <Section title="Programs on the brain">
             <div className="mb-2 flex gap-2">
@@ -779,106 +551,6 @@ export function BrainPanel({
                 ))}
               </ul>
             )}
-          </Section>
-
-          <Section title="Files on the brain">
-            <button
-              type="button"
-              disabled={operationBusy}
-              onClick={async () => {
-                setBrainFiles(await session.listBrainFiles());
-                setFilesLoaded(true);
-              }}
-              className="mb-2 rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge disabled:opacity-50"
-            >
-              {filesLoaded ? 'Refresh' : 'List files'}
-            </button>
-            {filesLoaded &&
-              (brainFiles.length === 0 ? (
-                <p className="text-sm text-ink-dim">Nothing stored.</p>
-              ) : (
-                <ul className="space-y-0.5">
-                  {brainFiles.map((file) => (
-                    <li key={file.filename} className="flex gap-2 text-[12px]">
-                      <span className="flex-1 truncate font-mono">{file.filename}</span>
-                      <span className="shrink-0 text-ink-dim">
-                        {file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ))}
-          </Section>
-
-          <Section title="Firmware">
-            {(() => {
-              const fw = firmwareState(snapshot.systemVersion, latestFirmware);
-              return (
-                <>
-                  <Row label="Installed" value={fw.installed?.display ?? snapshot.systemVersion} />
-                  <Row
-                    label="Latest from VEX"
-                    value={fw.latest?.display ?? (latestFirmware ? latestFirmware : 'checking…')}
-                  />
-
-                  {fw.state === 'current' && (
-                    <p className="mt-2 text-xs text-ok">Already on the current vexOS.</p>
-                  )}
-                  {fw.state === 'ahead' && (
-                    <p className="mt-2 text-xs text-ink-dim">
-                      This brain is newer than the published release. Nothing to do.
-                    </p>
-                  )}
-                  {fw.state === 'unknown' && (
-                    <p className="mt-2 text-xs text-ink-dim">
-                      Could not read both versions, so no update is offered.
-                    </p>
-                  )}
-
-                  {fw.state === 'update-available' && (
-                    <>
-                      <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                        Flashing rewrites the brain&apos;s boot image.{' '}
-                        <span className="font-medium text-ink">
-                          Do not unplug or close this tab while it runs
-                        </span>{' '}
-                        — an interrupted flash can leave the brain unbootable. Use a charged
-                        battery and a data cable, and quit any other VEX software first.
-                      </p>
-
-                      {firmwareArmed ? (
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            type="button"
-                            onClick={updateFirmware}
-                            disabled={busy || Boolean(snapshot.transfer)}
-                            className="flex-1 rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
-                          >
-                            Yes, flash {fw.latest?.display}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setFirmwareArmed(false)}
-                            className="rounded-lg bg-panel px-3 py-2 text-sm transition hover:bg-edge"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setFirmwareArmed(true)}
-                          disabled={busy || Boolean(snapshot.transfer)}
-                          className="mt-2 w-full rounded-lg border border-edge bg-panel-raised px-3 py-2 text-sm font-medium transition hover:bg-panel disabled:opacity-50"
-                        >
-                          Update vexOS to {fw.latest?.display}
-                        </button>
-                      )}
-                    </>
-                  )}
-                </>
-              );
-            })()}
           </Section>
 
         </>

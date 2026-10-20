@@ -33,28 +33,27 @@ The robot connects to **your computer**, even when you use the hosted website.
 
 1. Turn on the brain and connect it to your computer by USB.
 2. Click **Connect USB** in the robot panel and select the VEX port.
-3. In **Upload to brain**, choose how the program is built:
+3. In **Upload to brain**, pick a slot and click **Compile & upload**.
 
-**Editor code** (no file needed). The room's Python is combined into one
-program, `main.py` last, and compiled to MicroPython bytecode by the server.
-Nothing is picked from disk, and editing the room changes what gets uploaded.
-**Compile & download** saves the bytecode without a brain attached, which is
-also the way to see the whole build working with no hardware present.
+The room's Python is combined into one program, `main.py` last, and compiled to
+MicroPython bytecode by the server. There is no file to choose, and editing the
+room changes what gets uploaded. **Compile & download** saves the bytecode
+without a brain attached, which is also the way to see the whole build working
+with no hardware present.
 
-**Compiled file.** Build in **VEXcode**, then drop or browse for the resulting
-`.bin`. The name comes from the filename. Editing the room does not change an
-already compiled `.bin`; rebuild it before uploading your changes.
+The first empty slot is selected once the brain's slots have loaded. If all
+eight are occupied, choose one explicitly; the panel shows which program will
+be replaced. Upload leaves the program stopped — use **Run** in **Programs on
+the brain** to start it.
 
-Either way, the first empty slot is selected once the brain's slots have
-loaded. If all eight are occupied, choose one explicitly; the panel shows which
-program will be replaced. **Upload to slot …** leaves the program stopped — use
-**Run** in **Programs on the brain** to start it.
+Two limits. The server needs the compiler installed (`npm run setup:compiler`,
+see below) — the hosted site has it or the panel says so. And the brain needs
+its Python runtime already present, which VEXcode installs the first time you
+download any Python program to it; without it the upload is refused rather than
+left to fail on the robot.
 
-Two limits on the Editor code path. The server needs the compiler installed
-(`npm run setup:compiler`, see below) — the hosted site has it or the panel
-says so. And the brain needs its Python runtime already present, which VEXcode
-installs the first time you download any Python program to it; without it the
-upload is refused rather than left to fail on the robot.
+VEXCollab no longer uploads a prebuilt `.bin`. For C++ or anything built
+elsewhere, use VEXcode.
 
 For program output, open the terminal and click **Open user port**. The V5 uses
 separate serial connections for robot commands and program output. Numeric
@@ -111,7 +110,7 @@ Ctrl/⌘ + S does **not** save a room to GitHub. Use **Save session to GitHub**.
 | The brain is missing from the port picker | Check that the brain is on, use a USB data cable, and close other apps using the serial port. |
 | Connecting says the brain never answered | Something else is holding the port — close VEXcode and any other VEXCollab tab, then unplug and replug the cable. |
 | No program output | Open the terminal's **user port** separately, then run a program that prints output. |
-| Upload asks for a `.bin` | Compile the program in VEXcode first; a Python source file is not an uploadable program. |
+| Upload says the compiler is missing | The server has no `mpy-cross`. Run `npm run setup:compiler` on it. |
 | A room is full or the server is busy | Follow the displayed capacity message and try again when space is available. |
 | A room has disappeared | Start another room and reopen your saved GitHub project. A room link cannot restore unsaved code. |
 | The editor does not load | Check your internet connection; the editor loads external assets. GitHub and Copilot also require internet access. |
@@ -174,8 +173,8 @@ npm run setup:compiler
 
 This needs `git`, `make` and a C compiler, and writes `mpy-cross` into
 `.vexcollab-tools/` (git-ignored). Set `VEXCOLLAB_MPY_CROSS` to use a compiler
-from somewhere else. Until it is installed, **Editor code** reports that the
-compiler is missing and **Compiled file** keeps working.
+from somewhere else. Until it is installed, **Compile & upload** reports that
+the compiler is missing.
 
 ### Launcher options
 
