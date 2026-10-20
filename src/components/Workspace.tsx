@@ -20,6 +20,7 @@ import { Settings } from './Settings';
 import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
 import { GitHubPanel } from './GitHubPanel';
+import { MarkdownPreview } from './MarkdownPreview';
 import { StatusBar } from './StatusBar';
 import { TerminalPane } from './TerminalPane';
 import type { Problem } from './EditorPane';
@@ -55,6 +56,8 @@ export function Workspace({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [copilot, setCopilot] = useState<'off' | 'signed-out' | 'ready' | 'thinking'>('off');
   const [showSettings, setShowSettings] = useState(false);
+  // Markdown files open as a rendered page; Edit switches to the source.
+  const [markdownView, setMarkdownView] = useState<'preview' | 'edit'>('preview');
   const [rail, setRail] = useState<'brain' | 'chat'>('brain');
   const [searchOpen, setSearchOpen] = useState(false);
   const [reveal, setReveal] = useState<{ line: number; nonce: number } | null>(null);
@@ -74,6 +77,8 @@ export function Workspace({
 
   const programFileCount = countProgramFiles(paths.map((path) => ({ path, contents: '' })));
   const activePath = paths.includes(active) ? active : (paths[0] ?? PROGRAM_FILE);
+  const isMarkdown = /\.(md|markdown)$/i.test(activePath);
+  const showPreview = isMarkdown && markdownView === 'preview';
 
   const openFile = useCallback((path: string) => {
     setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
@@ -424,8 +429,31 @@ export function Workspace({
             onClose={closeTab}
           />
 
+          {isMarkdown && (
+            <div className="flex shrink-0 items-center gap-1 border-b border-edge bg-panel px-2 py-1">
+              <span className="mr-auto text-[11px] text-ink-dim">Markdown</span>
+              {(['preview', 'edit'] as const).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={markdownView === view}
+                  onClick={() => setMarkdownView(view)}
+                  className={`rounded-md px-2.5 py-0.5 text-[11px] font-medium capitalize transition ${
+                    markdownView === view
+                      ? 'bg-panel-raised shadow-[0_1px_2px_rgba(0,0,0,0.08)]'
+                      : 'text-ink-dim hover:text-ink'
+                  }`}
+                >
+                  {view === 'preview' ? 'Preview' : 'Edit'}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="min-h-0 flex-1">
-            {provider ? (
+            {showPreview && doc ? (
+              <MarkdownPreview doc={doc} path={activePath} paths={paths} onOpenFile={openFile} />
+            ) : provider ? (
               <EditorPane
                 provider={provider}
                 path={activePath}
