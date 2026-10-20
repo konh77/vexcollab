@@ -720,39 +720,6 @@ export function BrainPanel({
             </Section>
           )}
 
-          <Section title="Match control">
-            <p className="mb-2 text-[11px] leading-relaxed text-ink-dim">
-              Drives the competition state machine directly — test autonomous without a
-              field controller or competition switch.
-            </p>
-            <div className="flex gap-1">
-              {(['disabled', 'driver', 'autonomous'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => session.setMatchMode(mode)}
-                  disabled={operationBusy}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium capitalize transition disabled:opacity-50 ${
-                    snapshot.matchMode === mode
-                      ? mode === 'autonomous'
-                        ? 'bg-warn text-shell'
-                        : mode === 'driver'
-                          ? 'bg-ok text-shell'
-                          : 'bg-ink text-shell'
-                      : 'bg-panel hover:bg-edge'
-                  }`}
-                >
-                  {mode === 'autonomous' ? 'Auton' : mode}
-                </button>
-              ))}
-            </div>
-            {snapshot.matchMode === 'autonomous' && (
-              <p className="mt-2 text-[11px] font-medium text-warn">
-                Autonomous is live — the robot may move on its own.
-              </p>
-            )}
-          </Section>
-
           <Section title="Programs on the brain">
             <div className="mb-2 flex gap-2">
               <button

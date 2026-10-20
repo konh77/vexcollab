@@ -629,24 +629,6 @@ export class V5Session {
     });
   }
 
-  /**
-   * Drives the competition state machine from here, so autonomous can be
-   * tested without a field controller or a competition switch.
-   */
-  async setMatchMode(mode: 'driver' | 'autonomous' | 'disabled') {
-    return this.exclusive(async () => {
-      const conn = this.connection;
-      if (!conn) return;
-      try {
-        await conn.setMatchMode(mode);
-        this.patch({ matchMode: mode });
-        await this.refreshLocked();
-      } catch (error) {
-        this.fail(error, `Switching to ${mode} failed`);
-      }
-    });
-  }
-
   /** Removes a program from the brain by its binary's filename. */
   async deleteProgram(binfile: string) {
     return this.exclusive(async () => {

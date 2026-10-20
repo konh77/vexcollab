@@ -139,8 +139,7 @@ def driver_control():
         wait(20, MSEC)
 
 
-# The competition object calls these when the field switch says so. You can
-# also drive it yourself from the Brain panel's match control.
+# The competition object calls these when the field switch says so.
 competition = Competition(driver_control, autonomous)
 
 pre_autonomous()
@@ -205,7 +204,7 @@ def turn_to(heading, timeout_msec=3000):
         path: 'README.md',
         contents: README(
           'Competition project',
-          'Autonomous and driver control, split the way a match runs.\n\nTest autonomous without a field switch using **match control** in the Brain panel.',
+          'Autonomous and driver control, split the way a match runs.',
         ),
       },
     ],
