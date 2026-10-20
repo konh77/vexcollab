@@ -6,11 +6,13 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { editor as MonacoEditor } from 'monaco-editor';
 import { useCollab } from '@/lib/collab/useCollab';
 import { rememberRoom } from '@/lib/collab/recent';
 import { applyIncomingFiles, insertDeclaration, readAllFiles, readFile } from '@/lib/collab/project';
 import { useAnalysis } from '@/lib/editor/useAnalysis';
 import { bundlePythonProject, countProgramFiles } from '@/lib/vex/program';
+import { entryAtCursor, resolveSnippet } from '@/lib/vex/help';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { ChatPanel } from './ChatPanel';
@@ -20,6 +22,7 @@ import { Settings } from './Settings';
 import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
 import { GitHubPanel } from './GitHubPanel';
+import { HelpPanel } from './HelpPanel';
 import { PasscodeGate } from './PasscodeGate';
 import { MarkdownPreview } from './MarkdownPreview';
 import { StatusBar } from './StatusBar';
@@ -59,10 +62,16 @@ export function Workspace({
   const [showSettings, setShowSettings] = useState(false);
   // Markdown files open as a rendered page; Edit switches to the source.
   const [markdownView, setMarkdownView] = useState<'preview' | 'edit'>('preview');
-  const [rail, setRail] = useState<'brain' | 'chat'>('brain');
+  const [rail, setRail] = useState<'brain' | 'help' | 'chat'>('brain');
   // Below 1024px there is room for one thing at a time, so this says which. On a
   // desktop every pane is visible regardless and this only picks the right rail.
-  const [pane, setPane] = useState<'files' | 'code' | 'output' | 'brain' | 'chat'>('code');
+  const [pane, setPane] = useState<'files' | 'code' | 'output' | 'brain' | 'help' | 'chat'>('code');
+  // The live editor, so the Help box can put code into it. Null while a rendered
+  // Markdown page is showing, since there is no editor then.
+  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  // A ref changing does not re-render, so the Help box's "can I insert" would
+  // stay false until something else did. This makes the editor arriving a render.
+  const [, setEditorArrived] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [reveal, setReveal] = useState<{ line: number; nonce: number } | null>(null);
 
@@ -136,6 +145,69 @@ export function Workspace({
     },
     [doc, analysis.devices, paths, jumpTo],
   );
+
+  /**
+   * Puts text from the Help box into the editor. A snippet goes in through
+   * Monaco's own snippet controller so its tab stops work; a block (a whole
+   * recipe) goes on a new line below the cursor so it never splits one. Returns
+   * whether anything went in, so the button can say so.
+   */
+  const insertIntoEditor = useCallback(
+    (text: string, kind: 'snippet' | 'text' | 'block') => {
+      const editor = editorRef.current;
+      if (!editor || showPreview) return false;
+      try {
+        editor.focus();
+        if (kind === 'snippet') {
+          const snippets = editor.getContribution('snippetController2') as
+            | { insert?: (snippet: string) => void }
+            | null;
+          if (snippets?.insert) {
+            snippets.insert(text);
+            setPane((current) => (current === 'help' ? 'code' : current));
+            return true;
+          }
+          text = resolveSnippet(text);
+        }
+        if (kind === 'block') {
+          const model = editor.getModel();
+          const position = editor.getPosition();
+          if (!model || !position) return false;
+          const column = model.getLineMaxColumn(position.lineNumber);
+          editor.executeEdits('vexcollab-help', [
+            {
+              range: {
+                startLineNumber: position.lineNumber,
+                startColumn: column,
+                endLineNumber: position.lineNumber,
+                endColumn: column,
+              },
+              text: `\n${text}\n`,
+              forceMoveMarkers: true,
+            },
+          ]);
+        } else {
+          const selection = editor.getSelection();
+          if (!selection) return false;
+          editor.executeEdits('vexcollab-help', [{ range: selection, text, forceMoveMarkers: true }]);
+        }
+        setPane((current) => (current === 'help' ? 'code' : current));
+        return true;
+      } catch {
+        return false; // the editor was torn down between the click and here
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [showPreview],
+  );
+
+  /** The documented call the cursor is on, for the Help box to offer. */
+  const helpAtCursor = useMemo(() => {
+    if (!activePath.endsWith('.py') || showPreview) return null;
+    const model = editorRef.current?.getModel();
+    if (!model || cursor.line > model.getLineCount()) return null;
+    return entryAtCursor(model.getLineContent(cursor.line), cursor.column, analysis.devices);
+  }, [cursor, activePath, showPreview, analysis.devices]);
 
   /**
    * Show or hide the terminal. Beside the editor on a desktop that is a toggle;
@@ -257,6 +329,16 @@ export function Workspace({
         run: () => setSearchOpen(true),
       },
       {
+        id: 'view.help',
+        label: 'Open the help and cheat sheets',
+        group: 'View',
+        hint: '⌘/',
+        run: () => {
+          setRail('help');
+          setPane('help');
+        },
+      },
+      {
         id: 'view.chat',
         label: rail === 'chat' ? 'Show the brain panel' : 'Ask Copilot about this code',
         group: 'View',
@@ -324,6 +406,12 @@ export function Workspace({
       if (mod && event.key.toLowerCase() === 'j') {
         event.preventDefault();
         toggleTerminal();
+      }
+      // Cmd-/ opens the Help box, or closes it again.
+      if (mod && event.key === '/') {
+        event.preventDefault();
+        setRail((current) => (current === 'help' ? 'brain' : 'help'));
+        setPane((current) => (current === 'help' ? 'code' : 'help'));
       }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
@@ -516,6 +604,10 @@ export function Workspace({
                   .filter((w) => w.file === activePath)
                   .map((w) => ({ line: w.line, message: w.message, severity: w.severity }))}
                 onCursorChange={setCursor}
+                onEditorReady={(editor) => {
+                  editorRef.current = editor;
+                  setEditorArrived((count) => count + 1);
+                }}
                 onProblemsChange={(list: Problem[]) =>
                   setProblemsByPath((prev) => ({ ...prev, [activePath]: list.length }))
                 }
@@ -546,11 +638,11 @@ export function Workspace({
 
         <aside
           className={`${
-            pane === 'brain' || pane === 'chat' ? 'flex min-w-0 flex-1' : 'hidden'
+            pane === 'brain' || pane === 'help' || pane === 'chat' ? 'flex min-w-0 flex-1' : 'hidden'
           } flex-col border-l border-edge bg-shell lg:flex lg:w-80 lg:flex-none lg:shrink-0`}
         >
           <div className="hidden shrink-0 gap-1 border-b border-edge bg-panel p-1 lg:flex">
-            {(['brain', 'chat'] as const).map((tab) => (
+            {(['brain', 'help', 'chat'] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -559,7 +651,7 @@ export function Workspace({
                   rail === tab ? 'bg-panel-raised shadow-[0_1px_2px_rgba(0,0,0,0.08)]' : 'text-ink-dim hover:text-ink'
                 }`}
               >
-                {tab === 'brain' ? 'Brain' : 'Chat'}
+                {tab === 'brain' ? 'Brain' : tab === 'help' ? 'Help' : 'Chat'}
               </button>
             ))}
           </div>
@@ -575,6 +667,15 @@ export function Workspace({
             onJump={jumpTo}
             onAssignDevice={doc ? assignDevice : undefined}
           />
+          </div>
+
+          <div className={`min-h-0 flex-1 ${rail === 'help' ? '' : 'hidden'}`}>
+            <HelpPanel
+              declared={analysis.devices}
+              atCursor={helpAtCursor}
+              canInsert={Boolean(editorRef.current) && !showPreview}
+              onInsert={insertIntoEditor}
+            />
           </div>
 
           {/* Kept mounted so the conversation survives switching tabs. */}
@@ -611,6 +712,7 @@ export function Workspace({
             { id: 'code', label: 'Code' },
             { id: 'output', label: 'Output' },
             { id: 'brain', label: 'Brain' },
+            { id: 'help', label: 'Help' },
             { id: 'chat', label: 'Chat' },
           ] as const
         ).map((item) => {
@@ -624,7 +726,7 @@ export function Workspace({
               aria-current={current ? 'page' : undefined}
               onClick={() => {
                 setPane(item.id);
-                if (item.id === 'brain' || item.id === 'chat') setRail(item.id);
+                if (item.id === 'brain' || item.id === 'help' || item.id === 'chat') setRail(item.id);
               }}
               className={`min-h-12 flex-1 px-1 text-[12px] font-medium transition ${
                 'phoneOnly' in item && item.phoneOnly ? 'md:hidden' : ''
