@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useBackdropClose } from '@/lib/ui/backdrop';
 
 export interface SearchHit {
   file: string;
@@ -63,6 +64,7 @@ function search(
 }
 
 export function SearchPanel({ open, files, onClose, onJump }: Props) {
+  const backdrop = useBackdropClose(onClose);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
@@ -99,7 +101,7 @@ export function SearchPanel({ open, files, onClose, onJump }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-[12vh]"
-      onClick={onClose}
+      {...backdrop}
       role="presentation"
     >
       <div

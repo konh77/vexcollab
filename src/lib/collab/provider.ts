@@ -160,6 +160,16 @@ export class CollabProvider {
     return () => this.peersListeners.delete(listener);
   }
 
+  /**
+   * Changes who this client is to everyone else, in place. The awareness 'update'
+   * listener already broadcasts the change, so cursors and the peer list pick up
+   * the new name and colour without the page having to reload.
+   */
+  setUser(user: LocalUser) {
+    if (this.destroyed) return;
+    this.awareness.setLocalStateField('user', user);
+  }
+
   destroy() {
     this.destroyed = true;
     if (typeof window !== 'undefined') {

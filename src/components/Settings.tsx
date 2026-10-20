@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useBackdropClose } from '@/lib/ui/backdrop';
 import { loadIdentity, saveIdentity } from '@/lib/collab/identity';
 import { loadPrefs, savePrefs, type Prefs } from '@/lib/editor/prefs';
 import { EDITOR_FONTS, EDITOR_THEMES, fontStack } from '@/lib/editor/themes';
@@ -23,7 +24,17 @@ async function github(action: string, extra: Record<string, unknown> = {}): Prom
   return (await response.json()) as ApiResult;
 }
 
-export function Settings({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function Settings({
+  open,
+  onClose,
+  onIdentityChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Tells a room already open who you are now, so no reload is needed. */
+  onIdentityChange?: (identity: { name: string; color: string }) => void;
+}) {
+  const backdrop = useBackdropClose(onClose);
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLORS[3]);
   const [login, setLogin] = useState<string | null>(null);
@@ -109,11 +120,14 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
   if (!open) return null;
 
   const commit = () => {
-    saveIdentity({ name: name.trim() || 'Anonymous', color });
+    const identity = { name: name.trim() || 'Anonymous', color };
+    saveIdentity(identity);
+    // Applied to the open room in place. This used to reload the page, and a
+    // room is dropped the moment its last person leaves -- so for anyone
+    // working alone the reload threw away every file and reseeded the starter
+    // (or, for a Blank or repo room, left an empty editor).
+    onIdentityChange?.(identity);
     onClose();
-    // Awareness state is set when a room provider is built, so a reload is the
-    // honest way to apply a new name to a room already open.
-    if (window.location.pathname.startsWith('/room/')) window.location.reload();
   };
 
   const startDeviceFlow = async () => {
@@ -155,7 +169,7 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/25 pt-[10vh]"
-      onClick={onClose}
+      {...backdrop}
       role="presentation"
     >
       <div

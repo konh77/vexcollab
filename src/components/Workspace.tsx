@@ -515,7 +515,11 @@ export function Workspace({
         onClose={() => setSearchOpen(false)}
         onJump={jumpTo}
       />
-      <Settings open={showSettings} onClose={() => setShowSettings(false)} />
+      <Settings
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        onIdentityChange={(identity) => provider?.setUser(identity)}
+      />
     </div>
   );
 }

@@ -48,13 +48,24 @@ function useRemoteCursorStyles(provider: CollabProvider) {
       const rules: string[] = [];
       provider.awareness.getStates().forEach((state, clientId) => {
         if (clientId === provider.doc.clientID) return;
-        const user = (state as { user?: { name: string; color: string } }).user;
+        const user = (state as { user?: { name: unknown; color: unknown } }).user;
         if (!user) return;
-        const safeName = user.name.replace(/["\\]/g, '');
+        // Both come from another browser, so neither is trusted: they are spliced
+        // into CSS, where a colour like `red;}body{background:url(//x)` would
+        // inject rules into everyone's page, and a name containing a newline
+        // would end the string early. Accept a plain hex colour only, and strip
+        // the name to printable characters that cannot leave the string.
+        const color =
+          typeof user.color === 'string' && /^#[0-9a-f]{6}$/i.test(user.color)
+            ? user.color
+            : '#8e8e93';
+        const safeName = (typeof user.name === 'string' ? user.name : '')
+          .replace(/[^\p{L}\p{N} _.\-]/gu, '')
+          .slice(0, 40);
         rules.push(
-          `.yRemoteSelection-${clientId}{background-color:${user.color}40;}`,
-          `.yRemoteSelectionHead-${clientId}{border-color:${user.color};}`,
-          `.yRemoteSelectionHead-${clientId}::after{content:"${safeName}";background-color:${user.color};}`,
+          `.yRemoteSelection-${clientId}{background-color:${color}40;}`,
+          `.yRemoteSelectionHead-${clientId}{border-color:${color};}`,
+          `.yRemoteSelectionHead-${clientId}::after{content:"${safeName}";background-color:${color};}`,
         );
       });
       style.textContent = rules.join('\n');

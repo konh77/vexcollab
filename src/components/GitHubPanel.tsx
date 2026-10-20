@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type * as Y from 'yjs';
 import { applyIncomingFiles, readAllFiles } from '@/lib/collab/project';
+import { useBackdropClose } from '@/lib/ui/backdrop';
 
 interface Repo {
   fullName: string;
@@ -32,6 +33,7 @@ export function GitHubPanel({ doc, roomId }: { doc: Y.Doc; roomId: string }) {
   const [pat, setPat] = useState('');
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [picking, setPicking] = useState(false);
+  const backdrop = useBackdropClose(() => setPicking(false));
   const [openRepo, setOpenRepo] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -261,7 +263,7 @@ export function GitHubPanel({ doc, roomId }: { doc: Y.Doc; roomId: string }) {
       {picking && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-[12vh]"
-          onClick={() => setPicking(false)}
+          {...backdrop}
           role="presentation"
         >
           <div

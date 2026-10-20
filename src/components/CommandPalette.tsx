@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useBackdropClose } from '@/lib/ui/backdrop';
 
 export interface Command {
   id: string;
@@ -39,6 +40,7 @@ function score(query: string, text: string): number {
 }
 
 export function CommandPalette({ open, commands, onClose }: Props) {
+  const backdrop = useBackdropClose(onClose);
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -78,7 +80,7 @@ export function CommandPalette({ open, commands, onClose }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-[12vh]"
-      onClick={onClose}
+      {...backdrop}
       role="presentation"
     >
       <div

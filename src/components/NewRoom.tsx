@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useBackdropClose } from '@/lib/ui/backdrop';
 import { TEMPLATES } from '@/lib/vex/templates';
 import { TrafficLights } from './TrafficLights';
 
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function NewRoom({ open, onClose, onStart }: Props) {
+  const backdrop = useBackdropClose(onClose);
   const [tab, setTab] = useState<'template' | 'github'>('template');
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [login, setLogin] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export function NewRoom({ open, onClose, onStart }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/25 pt-[10vh]"
-      onClick={onClose}
+      {...backdrop}
       role="presentation"
     >
       <div
