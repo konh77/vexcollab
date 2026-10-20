@@ -4,6 +4,46 @@
  */
 'use client';
 
+import { useEffect, useState } from 'react';
+import type { PinnedStatus } from '@/lib/collab/provider';
+
+/** "just now", "3 min ago": coarse on purpose, so it only needs to tick now and then. */
+function ago(from: number | null, now: number): string {
+  if (!from) return 'not yet';
+  const seconds = Math.max(0, Math.round((now - from) / 1000));
+  if (seconds < 20) return 'just now';
+  if (seconds < 90) return 'a minute ago';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+}
+
+function PinnedChip({ status }: { status: PinnedStatus }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (status.state === 'conflict' || status.state === 'error') {
+    return (
+      <span className="text-vex" title={status.message ?? undefined}>
+        {status.state === 'conflict' ? 'Save paused — conflict' : 'Not saving'}
+      </span>
+    );
+  }
+  if (!status.pushing) {
+    return <span title={status.message ?? 'Kept on the server; no repository is connected'}>Pinned</span>;
+  }
+  if (status.state === 'syncing' || status.state === 'starting') return <span>Saving…</span>;
+  return (
+    <span className="text-ok" title="Changes are committed to the repository automatically">
+      Saved {ago(status.lastPushAt ?? status.lastSyncAt, now)}
+    </span>
+  );
+}
+
 interface Props {
   path: string;
   cursor: { line: number; column: number };
@@ -12,6 +52,8 @@ interface Props {
   connected: boolean;
   brainState: string;
   copilot: 'off' | 'signed-out' | 'ready' | 'thinking';
+  /** Present only in a pinned room. */
+  pinned?: PinnedStatus | null;
   onOpenPalette: () => void;
 }
 
@@ -23,6 +65,7 @@ export function StatusBar({
   connected,
   brainState,
   copilot,
+  pinned = null,
   onOpenPalette,
 }: Props) {
   return (
@@ -46,6 +89,8 @@ export function StatusBar({
         <span className={`size-1.5 rounded-full ${connected ? 'bg-ok' : 'bg-ink-dim'}`} />
         {connected ? `${peers} editing` : 'offline'}
       </span>
+
+      {pinned && <PinnedChip status={pinned} />}
 
       <span>{brainState}</span>
 

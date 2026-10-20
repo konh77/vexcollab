@@ -19,6 +19,38 @@ export interface LocalUser {
   color: string;
 }
 
+/** How a pinned room is doing with its repository, as the server reports it. */
+export interface PinnedStatus {
+  state: 'starting' | 'idle' | 'syncing' | 'conflict' | 'error' | 'local';
+  message: string | null;
+  lastPushAt: number | null;
+  lastSyncAt: number | null;
+  /** False when the room is only kept on the server, with no repository. */
+  pushing: boolean;
+}
+
+/** Why the server wants a passcode: none was sent, or the one sent was wrong. */
+export type PasscodeReason = 'required' | 'wrong';
+
+const passcodeKey = (roomId: string) => `vexcollab.passcode:${roomId.toLowerCase()}`;
+
+function rememberedPasscode(roomId: string): string | undefined {
+  try {
+    return window.sessionStorage.getItem(passcodeKey(roomId)) ?? undefined;
+  } catch {
+    return undefined; // storage can be blocked; the prompt still works
+  }
+}
+
+function rememberPasscode(roomId: string, passcode: string | null) {
+  try {
+    if (passcode) window.sessionStorage.setItem(passcodeKey(roomId), passcode);
+    else window.sessionStorage.removeItem(passcodeKey(roomId));
+  } catch {
+    // Not being able to remember it means asking again after a reload.
+  }
+}
+
 /**
  * A deliberately small alternative to y-websocket: the server is a plain
  * Socket.IO relay that also keeps the authoritative Y.Doc, so a late joiner
@@ -34,10 +66,16 @@ export class CollabProvider {
   private peersListeners = new Set<(peers: Peer[]) => void>();
   private syncedListeners = new Set<() => void>();
   private errorListeners = new Set<(message: string | null) => void>();
+  private passcodeListeners = new Set<(reason: PasscodeReason | null) => void>();
+  private pinnedListeners = new Set<(status: PinnedStatus | null) => void>();
   private hasSynced = false;
   private destroyed = false;
+  private readonly roomId: string;
+  private readonly user: LocalUser;
 
   constructor(roomId: string, user: LocalUser, doc = new Y.Doc()) {
+    this.roomId = roomId;
+    this.user = user;
     this.doc = doc;
     this.awareness = new Awareness(doc);
     this.awareness.setLocalStateField('user', user);
@@ -76,24 +114,7 @@ export class CollabProvider {
 
     this.socket.on('connect', () => {
       this.errorListeners.forEach((l) => l(null));
-      this.socket.emit(
-        'join',
-        { roomId, user },
-        (res: { update?: ArrayBuffer; error?: string }) => {
-          if (this.destroyed) return;
-          // The server refuses a join when it is at capacity or the session is
-          // full. Reconnecting would not help, so explain and stop trying.
-          if (res?.error || !res?.update) {
-            this.errorListeners.forEach((l) => l(res?.error ?? 'The server refused this session.'));
-            this.socket.disconnect();
-            return;
-          }
-          Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
-          this.broadcastLocalAwareness();
-          this.hasSynced = true;
-          this.syncedListeners.forEach((l) => l());
-        },
-      );
+      this.join(rememberedPasscode(roomId));
       this.connectedListeners.forEach((l) => l(true));
     });
 
@@ -124,9 +145,78 @@ export class CollabProvider {
       this.errorListeners.forEach((l) => l(reason));
     });
 
+    this.socket.on('pinned-status', (status: PinnedStatus) =>
+      this.pinnedListeners.forEach((l) => l(status)),
+    );
+
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload);
     }
+  }
+
+  /**
+   * Asks the server into the room. A pinned room answers with a reason code
+   * rather than a bare refusal, because "needs a passcode" is something the
+   * person can fix and the page should ask for it, not give up.
+   */
+  private join(passcode?: string) {
+    this.socket.emit(
+      'join',
+      { roomId: this.roomId, user: this.user, passcode },
+      (res: { update?: ArrayBuffer; error?: string; code?: string; pinned?: PinnedStatus }) => {
+        if (this.destroyed) return;
+
+        if (res?.code === 'passcode-required' || res?.code === 'wrong-passcode') {
+          const wrong = res.code === 'wrong-passcode';
+          if (wrong) rememberPasscode(this.roomId, null);
+          this.passcodeListeners.forEach((l) => l(wrong ? 'wrong' : 'required'));
+          return;
+        }
+        if (res?.code === 'starting') {
+          // The room is clearing its first sync. Not the person's problem, so
+          // wait it out rather than showing a failure.
+          this.errorListeners.forEach((l) => l(res.error ?? 'The room is starting up.'));
+          setTimeout(() => !this.destroyed && this.socket.connected && this.join(passcode), 3000);
+          return;
+        }
+
+        // The server refuses a join when it is at capacity or the session is
+        // full. Reconnecting would not help, so explain and stop trying.
+        if (res?.error || !res?.update) {
+          this.errorListeners.forEach((l) => l(res?.error ?? 'The server refused this session.'));
+          this.socket.disconnect();
+          return;
+        }
+
+        this.errorListeners.forEach((l) => l(null));
+        this.passcodeListeners.forEach((l) => l(null));
+        if (res.pinned) this.pinnedListeners.forEach((l) => l(res.pinned ?? null));
+        if (passcode) rememberPasscode(this.roomId, passcode);
+        Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
+        this.broadcastLocalAwareness();
+        this.hasSynced = true;
+        this.syncedListeners.forEach((l) => l());
+      },
+    );
+  }
+
+  /** Sends a passcode the person typed. The result arrives through the listeners. */
+  submitPasscode(passcode: string) {
+    this.join(passcode.trim());
+  }
+
+  onPasscode(listener: (reason: PasscodeReason | null) => void) {
+    this.passcodeListeners.add(listener);
+    return () => {
+      this.passcodeListeners.delete(listener);
+    };
+  }
+
+  onPinnedStatus(listener: (status: PinnedStatus | null) => void) {
+    this.pinnedListeners.add(listener);
+    return () => {
+      this.pinnedListeners.delete(listener);
+    };
   }
 
   private handleUnload = () => {

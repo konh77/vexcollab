@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
+import { PinnedRoom, loadPinnedConfig, verifyPasscode } from './pinned-rooms.mjs';
 
 // Load .env.local before anything reads process.env. Node has done this
 // natively since 21.7, so no dotenv dependency is needed. Values already in the
@@ -75,6 +76,23 @@ const LIMITS = {
 };
 
 const COOKIE = 'vexcollab_auth';
+
+/**
+ * Where long-lived state goes: pinned rooms' snapshots and their Git working
+ * trees. Ordinary rooms never touch it. The service's sandbox only lets it
+ * write under its data directory, so that is the one place this can live.
+ */
+const dataDir = process.env.VEXCOLLAB_DATA_DIR ?? join(process.cwd(), '.vexcollab-data');
+
+/**
+ * Pinned rooms are declared in a config file beside the secrets they need --
+ * never in this repository. The first of these that exists is used.
+ */
+const pinnedConfigFile = [
+  process.env.VEXCOLLAB_PINNED_FILE,
+  '/etc/vexcollab/pinned-rooms.json',
+  join(dataDir, 'pinned-rooms.json'),
+].find((file) => file && existsSync(file));
 
 /** Behind Caddy/nginx the TLS terminates upstream; trust the proxy's headers. */
 const trustProxy = process.env.VEXCOLLAB_TRUST_PROXY === '1';
@@ -273,6 +291,12 @@ const handle = app.getRequestHandler();
  */
 const rooms = new Map();
 
+/**
+ * Rooms that never close, keyed by their lowercase id.
+ * @type {Map<string, { config: ReturnType<typeof loadPinnedConfig>[number], pinned: PinnedRoom }>}
+ */
+const pinnedRooms = new Map();
+
 const roomsCreatedByIp = new Map();
 
 function countRoomsForIp(ip) {
@@ -285,6 +309,9 @@ function countRoomsForIp(ip) {
 function dropRoom(roomId, reason) {
   const room = rooms.get(roomId);
   if (!room) return;
+  // A pinned room is not the server's to close: not when empty, not when idle,
+  // not when a limit is reached. That is the whole point of it.
+  if (room.pinned) return;
   room.doc.destroy();
   rooms.delete(roomId);
   roomsCreatedByIp.delete(roomId);
@@ -306,7 +333,10 @@ function acquireRoom(roomId, ip) {
     return { room: existing };
   }
 
-  if (rooms.size >= LIMITS.maxRooms) {
+  // Pinned rooms are the operator's, not the public's, so they do not use up
+  // the room allowance a stranger could otherwise be blocked by.
+  const openRooms = [...rooms.values()].filter((entry) => !entry.pinned).length;
+  if (openRooms >= LIMITS.maxRooms) {
     return { error: 'The server is at capacity. Try again in a few minutes.' };
   }
   if (countRoomsForIp(ip) >= LIMITS.maxRoomsPerIp) {
@@ -360,6 +390,7 @@ function overDocLimit(room) {
 const sweeper = setInterval(() => {
   const now = Date.now();
   for (const [roomId, room] of rooms) {
+    if (room.pinned) continue;
     if (room.peers.size === 0) {
       dropRoom(roomId);
       continue;
@@ -453,29 +484,63 @@ io.on('connection', (socket) => {
   /** @type {string | null} */
   let joinedRoom = null;
 
-  socket.on('join', ({ roomId, user }, ack) => {
+  socket.on('join', async ({ roomId, user, passcode }, ack) => {
     if (typeof roomId !== 'string' || !roomId) return;
 
     const ip = socket.handshake.address ?? 'unknown';
-    const { room, error } = acquireRoom(roomId, ip);
+
+    // A pinned room is found by its id in any case, so /room/Team cannot be
+    // used to open an unprotected room that looks like the protected one.
+    const entry = pinnedRooms.get(roomId.toLowerCase());
+    let key = roomId;
+    if (entry) {
+      key = entry.config.id;
+      if (!entry.pinned.ready) {
+        ack?.({ error: 'This room is still starting up. Try again in a moment.', code: 'starting' });
+        return;
+      }
+
+      // Behind the proxy every socket arrives from 127.0.0.1, so throttle on the
+      // address the proxy reports -- otherwise one wrong guess locks everyone out.
+      const guesser = `passcode:${clientIp(socket.request)}`;
+      if (tooManyAttempts(guesser)) {
+        ack?.({ error: 'Too many wrong passcodes. Wait 15 minutes.', code: 'throttled' });
+        return;
+      }
+      if (typeof passcode !== 'string' || !passcode) {
+        ack?.({ error: 'This room needs a passcode.', code: 'passcode-required' });
+        return;
+      }
+      if (!(await verifyPasscode(entry.config.passcodeHash, passcode))) {
+        noteAttempt(guesser);
+        ack?.({ error: 'That passcode is not right.', code: 'wrong-passcode' });
+        return;
+      }
+    }
+
+    const { room, error } = acquireRoom(key, ip);
     if (error) {
       ack?.({ error });
       return;
     }
 
-    joinedRoom = roomId;
+    joinedRoom = key;
     room.lastActivity = Date.now();
     room.peers.set(socket.id, {
       name: String(user?.name ?? 'Anonymous').slice(0, 32),
       color: String(user?.color ?? '#888888').slice(0, 9),
     });
-    socket.join(roomId);
+    socket.join(key);
 
     // Hand the newcomer the whole document, then tell everyone who is here.
-    ack?.({ update: Y.encodeStateAsUpdate(room.doc), peerId: socket.id });
-    io.to(roomId).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
+    ack?.({
+      update: Y.encodeStateAsUpdate(room.doc),
+      peerId: socket.id,
+      pinned: room.pinned ? room.pinned.status : undefined,
+    });
+    io.to(key).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
     // Existing peers re-broadcast awareness so the newcomer sees their cursors.
-    socket.to(roomId).emit('announce-awareness');
+    socket.to(key).emit('announce-awareness');
   });
 
   socket.on('update', (update) => {
@@ -514,12 +579,63 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.peers.delete(socket.id);
     if (room.peers.size === 0) {
-      dropRoom(joinedRoom);
+      dropRoom(joinedRoom); // a no-op for a pinned room
     } else {
       io.to(joinedRoom).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
     }
   });
 });
+
+// --- pinned rooms -----------------------------------------------------------
+// Started without waiting: the server should be answering requests while a room
+// clones its repository, and the room refuses joins until it is ready.
+for (const config of pinnedConfigFile ? loadPinnedConfig(pinnedConfigFile) : []) {
+  const doc = new Y.Doc();
+  const pinned = new PinnedRoom({
+    config,
+    dataDir,
+    doc,
+    // Changes made by a sync are not client updates, so nothing would relay
+    // them; send them to whoever has the room open.
+    onChange: (update) => io.to(config.id).emit('update', update),
+    onStatus: (status) => io.to(config.id).emit('pinned-status', status),
+  });
+  const now = Date.now();
+  rooms.set(config.id, {
+    doc,
+    peers: new Map(),
+    createdAt: now,
+    lastActivity: now,
+    pendingBytes: 0,
+    measuredBytes: 0,
+    measuredAt: 0,
+    frozen: false,
+    creatorIp: 'pinned',
+    pinned,
+  });
+  pinnedRooms.set(config.id, { config, pinned });
+  void pinned.start();
+}
+
+if (pinnedRooms.size > 0) {
+  // Without this a restart is a kill: edits since the last snapshot are gone and
+  // the last few minutes never reach the repository. A bounded last sync, then
+  // the snapshot, then out.
+  let leaving = false;
+  const leave = async () => {
+    if (leaving) return;
+    leaving = true;
+    await Promise.all(
+      [...pinnedRooms.values()].map(async ({ pinned }) => {
+        await Promise.race([pinned.cycle(), new Promise((done) => setTimeout(done, 15_000))]).catch(() => {});
+        await pinned.stop();
+      }),
+    );
+    process.exit(0);
+  };
+  process.on('SIGTERM', leave);
+  process.on('SIGINT', leave);
+}
 
 httpServer.listen(port, hostname, () => {
   const lan = lanAddresses();
@@ -527,6 +643,11 @@ httpServer.listen(port, hostname, () => {
   console.log(`  On this computer   ${scheme}://localhost:${port}`);
   for (const address of lan) {
     console.log(`  On your Wi-Fi      ${scheme}://${address}:${port}`);
+  }
+  if (pinnedRooms.size > 0) {
+    console.log(
+      `\n  Pinned rooms (never close, need a passcode): ${[...pinnedRooms.keys()].join(', ')}\n`,
+    );
   }
   if (publicMode) {
     console.log(

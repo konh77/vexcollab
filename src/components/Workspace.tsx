@@ -20,6 +20,7 @@ import { Settings } from './Settings';
 import { EditorTabs } from './EditorTabs';
 import { FileSidebar } from './FileSidebar';
 import { GitHubPanel } from './GitHubPanel';
+import { PasscodeGate } from './PasscodeGate';
 import { MarkdownPreview } from './MarkdownPreview';
 import { StatusBar } from './StatusBar';
 import { TerminalPane } from './TerminalPane';
@@ -43,7 +44,7 @@ export function Workspace({
   template?: string | null;
   repo?: string | null;
 }) {
-  const { provider, doc, connected, peers, paths } = useCollab(roomId, template);
+  const { provider, doc, connected, peers, paths, error, passcode, pinned } = useCollab(roomId, template);
   const { session, snapshot } = useV5Session();
   const { terminal, output, isOpen, series, clear } = useV5Terminal();
 
@@ -408,6 +409,12 @@ export function Workspace({
         </div>
       </header>
 
+      {error && !passcode && (
+        <div role="alert" className="shrink-0 border-b border-edge bg-vex/10 px-3 py-1.5 text-xs text-vex">
+          {error}
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-48 shrink-0 flex-col border-r border-edge bg-panel">
           {doc && (
@@ -544,8 +551,17 @@ export function Workspace({
         connected={connected}
         brainState={brainState}
         copilot={copilot}
+        pinned={pinned}
         onOpenPalette={() => setPaletteOpen(true)}
       />
+
+      {passcode && provider && (
+        <PasscodeGate
+          reason={passcode}
+          roomId={roomId}
+          onSubmit={(attempt) => provider.submitPasscode(attempt)}
+        />
+      )}
 
       <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
       <SearchPanel
