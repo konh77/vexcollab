@@ -9,6 +9,7 @@
 import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { newSessionId } from '@/lib/github/store';
+import { publicOrigin } from '@/lib/github/origin';
 
 const CLIENT_ID = process.env.VEXCOLLAB_GITHUB_CLIENT_ID ?? '';
 
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const secure = url.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
+  const secure = publicOrigin(request).startsWith('https:');
 
   // A random state, echoed back by GitHub, is what stops someone else's
   // callback from being replayed into this browser.
@@ -44,10 +45,7 @@ export async function GET(request: Request) {
   authorize.searchParams.set('client_id', CLIENT_ID);
   authorize.searchParams.set('scope', 'repo');
   authorize.searchParams.set('state', state);
-  authorize.searchParams.set(
-    'redirect_uri',
-    `${url.protocol}//${url.host}/api/github/callback`,
-  );
+  authorize.searchParams.set('redirect_uri', `${publicOrigin(request)}/api/github/callback`);
 
   const response = NextResponse.redirect(authorize.toString());
   response.headers.append('Set-Cookie', cookie('vexcollab_oauth_state', state, secure));
