@@ -1,4 +1,4 @@
-# Running VEXCollab on a Raspberry Pi at `konh.org`
+# Running VEXCollab on a Raspberry Pi at `vex.konh.org`
 
 The Pi does very little: it serves the page and relays edits between browsers.
 All the heavy work — the editor, the USB connection to the brain, the Python
@@ -14,7 +14,7 @@ connects their own V5; nobody needs the Pi to be near a robot.
 
 Point your DNS at your home connection, or the certificate cannot be issued:
 
-- An `A` record for `konh.org` → your public IP (use a dynamic-DNS updater if it changes)
+- An `A` record for `vex.konh.org` → your public IP (use a dynamic-DNS updater if it changes)
 - On your router, forward **only ports 80 and 443** to the Pi
 - **Do not forward port 22.** The installer restricts SSH to your local network
 
@@ -34,7 +34,7 @@ Point your DNS at your home connection, or the certificate cannot be issued:
 5. Eject, put the card in the Pi, power it on.
 
 It installs itself on first boot. Give it 10–20 minutes on the first run (it
-builds the app), then open `https://konh.org`.
+builds the app), then open `https://vex.konh.org`.
 
 Watch it if you want: `ssh <you>@vexcollab.local` then
 `tail -f /var/log/vexcollab-firstboot.log`.
@@ -45,13 +45,25 @@ Flash with Imager as above (steps 1–3), boot the Pi, then:
 
 ```bash
 ssh <you>@vexcollab.local
-curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- konh.org
+curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- vex.konh.org
 ```
 
 Same result. Prefer this if Option A doesn't come up — the failure is visible
 instead of silent.
 
 ---
+
+## The argument is the app's own hostname
+
+Give the installer the hostname **VEXCollab** will answer on — here
+`vex.konh.org` — not the apex. The apex can carry a different site (see
+*Publishing a static site* below), and the installer only ever manages its own
+block of the Caddyfile, between the `# >>> vexcollab` and `# <<< vexcollab`
+markers. Everything else in the file is left alone, so a static site published
+beside the app survives every upgrade.
+
+If the Caddyfile already exists without those markers, the installer stops and
+tells you how to mark it instead of guessing.
 
 ## What the installer does to the Pi
 

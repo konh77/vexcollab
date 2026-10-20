@@ -12,7 +12,7 @@
 # the network, so a Wi-Fi that comes up slowly delays the install rather than
 # wedging the boot.
 
-VEXCOLLAB_DOMAIN="konh.org"
+VEXCOLLAB_DOMAIN="vex.konh.org"
 
 cat > /etc/systemd/system/vexcollab-firstboot.service <<'UNIT'
 [Unit]

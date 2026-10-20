@@ -5,13 +5,13 @@
 #
 # Idempotent: safe to re-run to upgrade.
 #
-#   curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- konh.org
+#   curl -fsSL https://raw.githubusercontent.com/konh77/vexcollab/main/deploy/pi/install.sh | sudo bash -s -- vex.konh.org
 #
 # Add --public to run an instance open to anyone: no password, and the
 # capacity limits in server.mjs are switched to their conservative defaults so
 # that a small box stays up under strangers.
 #
-#   ... | sudo bash -s -- konh.org --public
+#   ... | sudo bash -s -- vex.konh.org --public
 #
 set -euo pipefail
 
@@ -25,7 +25,7 @@ for arg in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
-DOMAIN="${1:-${VEXCOLLAB_DOMAIN:-konh.org}}"
+DOMAIN="${1:-${VEXCOLLAB_DOMAIN:-vex.konh.org}}"
 REPO="${VEXCOLLAB_REPO:-https://github.com/konh77/vexcollab.git}"
 APP_DIR=/opt/vexcollab
 ENV_FILE=/etc/vexcollab.env
@@ -236,7 +236,17 @@ systemctl restart vexcollab
 
 # --- reverse proxy + TLS ----------------------------------------------------
 log "Configuring Caddy for ${DOMAIN}"
-cat > /etc/caddy/Caddyfile <<EOF
+
+# Only the block between these markers belongs to this installer. The Caddyfile
+# also holds whatever else the Pi serves -- publish-site.sh puts a static site
+# in it -- and rewriting the whole file on every upgrade silently deleted that.
+mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy
+CADDYFILE=/etc/caddy/Caddyfile
+CADDY_BEGIN="# >>> vexcollab (managed by install.sh; the installer replaces only this block) >>>"
+CADDY_END="# <<< vexcollab <<<"
+CADDY_BLOCK="$(mktemp)"
+cat > "$CADDY_BLOCK" <<EOF
+${CADDY_BEGIN}
 ${DOMAIN} {
 	encode zstd gzip
 
@@ -258,8 +268,42 @@ ${DOMAIN} {
 		}
 	}
 }
+${CADDY_END}
 EOF
-mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy
+
+if [ -s "$CADDYFILE" ] && grep -qF "$CADDY_BEGIN" "$CADDYFILE"; then
+  # Upgrade: swap our block in place, leave everything else alone.
+  cp "$CADDYFILE" "${CADDYFILE}.backup-$(date +%Y%m%d-%H%M%S)"
+  awk -v b="$CADDY_BEGIN" -v e="$CADDY_END" -v f="$CADDY_BLOCK" '
+    index($0, b) { skip = 1; while ((getline line < f) > 0) print line; next }
+    index($0, e) { skip = 0; next }
+    !skip { print }
+  ' "$CADDYFILE" > "${CADDYFILE}.new"
+  mv "${CADDYFILE}.new" "$CADDYFILE"
+elif [ -s "$CADDYFILE" ] && grep -q '[^[:space:]]' "$CADDYFILE"; then
+  # A Caddyfile this installer did not mark. Rewriting it could drop sites it
+  # knows nothing about, and appending would duplicate ${DOMAIN} if it is
+  # already there -- so stop and say exactly what to do, rather than guess.
+  echo "" >&2
+  echo "  ${CADDYFILE} already exists and is not marked as managed by this installer." >&2
+  echo "  Not touching it. Wrap the block that serves ${DOMAIN} in these two lines" >&2
+  echo "  (keep any other sites outside them), then run the installer again:" >&2
+  echo "" >&2
+  echo "    ${CADDY_BEGIN}" >&2
+  echo "    ${CADDY_END}" >&2
+  echo "" >&2
+  rm -f "$CADDY_BLOCK"
+  exit 1
+else
+  cp "$CADDY_BLOCK" "$CADDYFILE"
+fi
+rm -f "$CADDY_BLOCK"
+# As the caddy user: validating as root would create the log file root-owned,
+# and the service could then never write to it.
+if ! runuser -u caddy -- caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
+  echo "  The resulting Caddyfile failed validation. Restore a ${CADDYFILE}.backup-* and retry." >&2
+  exit 1
+fi
 systemctl enable --now caddy
 systemctl reload caddy || systemctl restart caddy
 
