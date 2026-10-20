@@ -413,7 +413,18 @@ export function Workspace({
           {doc && (
             <>
               <div className="min-h-0 flex-1">
-                <FileSidebar doc={doc} paths={paths} active={activePath} onSelect={openFile} />
+                <FileSidebar
+                  doc={doc}
+                  paths={paths}
+                  active={activePath}
+                  onSelect={openFile}
+                  onMoved={(from, to) => {
+                    // A moved file keeps its tab: follow it to the new path
+                    // instead of letting the tab vanish and focus jump.
+                    setOpenTabs((tabs) => tabs.map((tab) => (tab === from ? to : tab)));
+                    setActive((current) => (current === from ? to : current));
+                  }}
+                />
               </div>
               <GitHubPanel doc={doc} roomId={roomId} />
             </>

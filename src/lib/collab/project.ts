@@ -144,3 +144,55 @@ export function insertDeclaration(doc: Y.Doc, path: string, declaration: string)
 
   return at + 1;
 }
+
+/** The entry file is found by this exact name when a program is bundled. */
+const ENTRY_FILE = 'main.py';
+
+export type MoveResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: 'entry' | 'missing' | 'exists' | 'same' };
+
+/** `lib/auton/path.py` -> `path.py` */
+export function basename(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+/** `lib/auton/path.py` -> `lib/auton`, and '' for a file at the top level. */
+export function dirname(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash === -1 ? '' : path.slice(0, slash);
+}
+
+/**
+ * Moves a file into a directory ('' is the top level), keeping its name.
+ *
+ * A room's files are a flat map keyed by path -- a folder only exists because a
+ * file's key says so -- so a move is a rename: the same text under a new key.
+ * A Y.Text cannot be re-parented, so the contents are copied into a fresh one,
+ * and the whole swap happens in one transaction so collaborators see the file
+ * leave one place and arrive in the other, never both or neither.
+ *
+ * Refuses to overwrite: dropping a file onto a folder that already has one by
+ * that name must not silently destroy somebody's work.
+ */
+export function moveFile(doc: Y.Doc, from: string, toDir: string): MoveResult {
+  const files = getFiles(doc);
+  const source = files.get(from);
+  if (!source) return { ok: false, reason: 'missing' };
+
+  // main.py is what the program is built around, and is looked up by this exact
+  // path. Moved into a folder it would stop being the entry point.
+  if (from === ENTRY_FILE) return { ok: false, reason: 'entry' };
+
+  const target = toDir ? `${toDir}/${basename(from)}` : basename(from);
+  if (target === from) return { ok: false, reason: 'same' };
+  if (target === ENTRY_FILE || files.has(target)) return { ok: false, reason: 'exists' };
+
+  doc.transact(() => {
+    const moved = new Y.Text();
+    moved.insert(0, source.toString());
+    files.set(target, moved);
+    files.delete(from);
+  });
+  return { ok: true, path: target };
+}

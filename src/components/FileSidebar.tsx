@@ -4,20 +4,81 @@
  */
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, type DragEvent } from 'react';
 import type * as Y from 'yjs';
-import { createFile, deleteFile } from '@/lib/collab/project';
+import { basename, createFile, deleteFile, dirname, moveFile } from '@/lib/collab/project';
+
+/** Carries the dragged file's path, so a drop works even if React state lags. */
+const DRAG_TYPE = 'application/x-vexcollab-path';
 
 interface Props {
   doc: Y.Doc;
   paths: string[];
   active: string;
   onSelect: (path: string) => void;
+  /** Called after a drag moves a file, so open tabs can follow it to its new path. */
+  onMoved?: (from: string, to: string) => void;
 }
 
-export function FileSidebar({ doc, paths, active, onSelect }: Props) {
+export function FileSidebar({ doc, paths, active, onSelect, onMoved }: Props) {
   const [newPath, setNewPath] = useState('');
   const [adding, setAdding] = useState(false);
+  // The file being dragged, and the directory ('' is the top level) it is over.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!note) return;
+    const timer = window.setTimeout(() => setNote(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [note]);
+
+  const drop = (from: string, toDir: string) => {
+    const result = moveFile(doc, from, toDir);
+    if (result.ok) {
+      setNote(null);
+      onMoved?.(from, result.path);
+      return;
+    }
+    if (result.reason === 'entry') {
+      setNote('main.py is the program\u2019s entry point, so it has to stay at the top level.');
+    } else if (result.reason === 'exists') {
+      setNote(`${toDir || 'The top level'} already has a file called ${basename(from)}.`);
+    } else if (result.reason === 'missing') {
+      setNote('That file was changed by someone else while you were dragging it.');
+    }
+  };
+
+  /**
+   * Handlers that make a spot in the list a place a file can be dropped.
+   * Propagation is always stopped so the innermost target wins: a row inside
+   * lib/ moves things to lib/, and only the empty space below the list means
+   * "the top level". Without that, hovering a sibling in the same folder would
+   * light up the top level instead.
+   */
+  const target = (dir: string) => ({
+    onDragOver: (event: DragEvent) => {
+      event.stopPropagation();
+      if (dragging === null || dirname(dragging) === dir) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (over !== dir) setOver(dir);
+    },
+    onDragLeave: (event: DragEvent) => {
+      // Moving between a row's own children fires leave; only clear on a real exit.
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      setOver((current) => (current === dir ? null : current));
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const from = dragging ?? event.dataTransfer.getData(DRAG_TYPE);
+      setOver(null);
+      setDragging(null);
+      if (from && dirname(from) !== dir) drop(from, dir);
+    },
+  });
 
   const add = () => {
     const path = newPath.trim();
@@ -54,13 +115,21 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
         </button>
       </div>
 
-      <ul className="vc-scroll flex-1 overflow-y-auto py-1">
+      <ul
+        className={`vc-scroll flex-1 overflow-y-auto py-1 transition ${
+          over === '' ? 'bg-vex/5 ring-1 ring-inset ring-vex/40' : ''
+        }`}
+        {...target('')}
+      >
         {dirs.flatMap((dir) => [
           ...(dir
             ? [
                 <li
                   key={`dir:${dir}`}
-                  className="flex items-center gap-1.5 px-4 pb-0.5 pt-2 text-[11px] font-medium text-ink-dim"
+                  {...target(dir)}
+                  className={`flex items-center gap-1.5 px-4 pb-0.5 pt-2 text-[11px] font-medium text-ink-dim transition ${
+                    over === dir ? 'bg-vex/10 text-ink' : ''
+                  }`}
                 >
                   <svg
                     width="11"
@@ -79,7 +148,23 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
               ]
             : []),
           ...groups.get(dir)!.map((path) => (
-          <li key={path} className={`group flex items-center px-2 ${dir ? 'pl-4' : ''}`}>
+          <li
+            key={path}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData(DRAG_TYPE, path);
+              event.dataTransfer.effectAllowed = 'move';
+              setDragging(path);
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setOver(null);
+            }}
+            {...target(dir)}
+            className={`group flex items-center px-2 transition ${dir ? 'pl-4' : ''} ${
+              dragging === path ? 'opacity-40' : ''
+            } ${over === dir && dragging !== null ? 'bg-vex/10' : ''}`}
+          >
             <button
               type="button"
               onClick={() => onSelect(path)}
@@ -129,6 +214,12 @@ export function FileSidebar({ doc, paths, active, onSelect }: Props) {
           </li>
         )}
       </ul>
+
+      {note && (
+        <p role="status" className="border-t border-edge px-3 py-2 text-[11px] leading-snug text-vex">
+          {note}
+        </p>
+      )}
     </div>
   );
 }
