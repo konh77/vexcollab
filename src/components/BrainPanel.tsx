@@ -282,7 +282,6 @@ export function BrainPanel({
       <Section title="Upload to brain">
         <div className="space-y-3 text-sm">
           <div className="space-y-2 text-[12px] leading-relaxed text-ink-dim">
-            <p>Compiles the current Python code and sends it straight to your Brain.</p>
             <p>{programFileCount} Python {programFileCount === 1 ? 'file' : 'files'} · MicroPython 1.13</p>
             <button type="button" onClick={downloadBuild} disabled={operationBusy || !programFileCount}
               className="w-full rounded-lg border border-edge px-3 py-2 font-medium text-ink transition hover:bg-panel disabled:opacity-50">
