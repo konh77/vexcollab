@@ -105,6 +105,23 @@ export function EditorPane({
 
   useRemoteCursorStyles(provider);
 
+  // The text this pane edits can arrive after the editor does -- a room opened
+  // from a GitHub repo is filled by a clone that lands once Monaco is already
+  // up, and a collaborator can replace a file's text outright -- so which Y.Text
+  // belongs to this path is state, not something read once at mount. Without it
+  // the editor stays bound to nothing: the file list is full and the page is
+  // blank until it is reloaded.
+  const [boundText, setBoundText] = useState<Y.Text | undefined>(
+    () => getFiles(provider.doc).get(path) as Y.Text | undefined,
+  );
+  useEffect(() => {
+    const files = getFiles(provider.doc);
+    const sync = () => setBoundText(files.get(path) as Y.Text | undefined);
+    sync();
+    files.observe(sync);
+    return () => files.unobserve(sync);
+  }, [provider, path]);
+
   const bind = (editor: MonacoEditor.IStandaloneCodeEditor) => {
     bindingRef.current?.destroy();
     bindingRef.current = null;
@@ -163,7 +180,7 @@ export function EditorPane({
       bindingRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, provider, ready]);
+  }, [path, provider, ready, boundText]);
 
   // Debounced syntax check, rendered as squiggles.
   useEffect(() => {
