@@ -47,7 +47,7 @@ export function Workspace({
   template?: string | null;
   repo?: string | null;
 }) {
-  const { provider, doc, connected, peers, paths, error, passcode, pinned } = useCollab(roomId, template);
+  const { provider, doc, connected, peers, paths, error, passcode, pinned, messages, selfId } = useCollab(roomId, template);
   const { session, snapshot } = useV5Session();
   const { terminal, output, isOpen, series, clear } = useV5Terminal();
 
@@ -209,6 +209,34 @@ export function Workspace({
     return entryAtCursor(model.getLineContent(cursor.line), cursor.column, analysis.devices);
   }, [cursor, activePath, showPreview, analysis.devices]);
 
+  // --- unread chat ------------------------------------------------------------
+  // "Seen" means the chat was actually on screen: its tab chosen, and -- below
+  // 1024px, where only one pane shows -- the Chat screen up as well.
+  const [desktop, setDesktop] = useState(true);
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1024px)');
+    const update = () => setDesktop(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  const chatVisible = rail === 'chat' && (desktop || pane === 'chat');
+  const lastMessageId = messages.at(-1)?.id ?? 0;
+  const [seenThrough, setSeenThrough] = useState<number | null>(null);
+
+  useEffect(() => {
+    // The first look at a room is not "unread": history that was already there
+    // when you arrived is not news.
+    if (selfId === null) return;
+    if (seenThrough === null || chatVisible) setSeenThrough(lastMessageId);
+  }, [selfId, chatVisible, lastMessageId, seenThrough]);
+
+  const unread =
+    seenThrough === null
+      ? 0
+      : messages.filter((message) => message.id > seenThrough && message.senderId !== selfId).length;
+
   /**
    * Show or hide the terminal. Beside the editor on a desktop that is a toggle;
    * below 1024px it is its own screen, so "show it" means go there.
@@ -340,7 +368,7 @@ export function Workspace({
       },
       {
         id: 'view.chat',
-        label: rail === 'chat' ? 'Show the brain panel' : 'Ask Copilot about this code',
+        label: rail === 'chat' ? 'Show the brain panel' : 'Open the team chat',
         group: 'View',
         run: () => {
           const next = rail === 'chat' ? 'brain' : 'chat';
@@ -549,7 +577,9 @@ export function Workspace({
                   }}
                 />
               </div>
-              <GitHubPanel doc={doc} roomId={roomId} />
+              {/* A pinned room commits itself to its repository, so a place to paste
+                  a personal token here would only be a second, worse way to do it. */}
+              {!pinned && <GitHubPanel doc={doc} roomId={roomId} />}
             </>
           )}
         </aside>
@@ -652,6 +682,11 @@ export function Workspace({
                 }`}
               >
                 {tab === 'brain' ? 'Brain' : tab === 'help' ? 'Help' : 'Chat'}
+                {tab === 'chat' && unread > 0 && (
+                  <span className="ml-1.5 rounded-full bg-vex px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                    {unread > 9 ? '9+' : unread}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -681,9 +716,12 @@ export function Workspace({
           {/* Kept mounted so the conversation survives switching tabs. */}
           <div className={`min-h-0 flex-1 ${rail === 'chat' ? '' : 'hidden'}`}>
             <ChatPanel
-              getContext={() =>
-                doc ? { path: activePath, contents: readFile(doc, activePath) } : null
-              }
+              messages={messages}
+              selfId={selfId}
+              connected={connected}
+              people={peers.length}
+              kept={Boolean(pinned)}
+              onSend={(text) => (provider ? provider.sendChat(text) : Promise.resolve('Not connected yet.'))}
             />
           </div>
         </aside>
@@ -737,6 +775,11 @@ export function Workspace({
               }`}
             >
               {item.label}
+              {item.id === 'chat' && unread > 0 && (
+                <span className="ml-1 rounded-full bg-vex px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
             </button>
           );
         })}

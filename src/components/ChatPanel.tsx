@@ -1,162 +1,257 @@
 /*
- * VEXCollab - talk to Copilot about the code in front of you.
+ * VEXCollab - team chat: the people in the room talking to each other.
  * Licensed under AGPL-3.0-only.
  */
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import type { ChatMessage } from '@/lib/collab/provider';
 
-interface Message {
-  role: 'user' | 'assistant';
-  text: string;
+const MAX_LENGTH = 1000;
+/** Same sender, this close together: one run, with the name shown once. */
+const RUN_MS = 5 * 60 * 1000;
+
+/** A colour that came from another browser is only used if it is a plain hex value. */
+function safeColor(color: string): string {
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : '#8e8e93';
 }
 
-interface Props {
-  /** The file being edited, sent as context so answers are about your code. */
-  getContext: () => { path: string; contents: string } | null;
+const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+
+/**
+ * Makes web addresses clickable. Only http and https are ever linked, so a
+ * message cannot carry a javascript: or data: link, and they open with noopener.
+ * Everything else stays text, which React escapes.
+ */
+function linkify(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"']+/g)) {
+    const start = match.index ?? 0;
+    // Trailing punctuation belongs to the sentence, not the address.
+    const url = match[0].replace(/[.,;:!?)\]]+$/, '');
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <a
+        key={start}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        className="underline underline-offset-2"
+      >
+        {url}
+      </a>,
+    );
+    last = start + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
 }
 
-export function ChatPanel({ getContext }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
+export function ChatPanel({
+  messages,
+  selfId,
+  connected,
+  people,
+  kept,
+  onSend,
+}: {
+  messages: ChatMessage[];
+  selfId: string | null;
+  connected: boolean;
+  /** How many are in the room right now. */
+  people: number;
+  /** Whether this room keeps its chat after everyone leaves. */
+  kept: boolean;
+  /** Resolves to null on success, or the reason it failed. */
+  onSend: (text: string) => Promise<string | null>;
+}) {
+  const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [includeFile, setIncludeFile] = useState(true);
-  const endRef = useRef<HTMLDivElement>(null);
+  const [sending, setSending] = useState(false);
+  const [unseen, setUnseen] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Whether the reader is at the bottom. If they have scrolled up to read
+  // something, a new message must not yank them away from it.
+  const stuck = useRef(true);
+  const seen = useRef(0);
 
-  useEffect(() => {
-    void fetch('/api/copilot/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'history' }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        setEnabled(Boolean(data.enabled));
-        if (Array.isArray(data.messages)) setMessages(data.messages);
-      })
-      .catch(() => setEnabled(false));
-  }, []);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages, busy]);
-
-  const send = async () => {
-    const prompt = input.trim();
-    if (!prompt || busy) return;
-
-    setMessages((m) => [...m, { role: 'user', text: prompt }]);
-    setInput('');
-    setBusy(true);
-    setError(null);
-
-    const file = includeFile ? getContext() : null;
-    const context = file
-      ? `Here is the file I am working on (${file.path}). It is VEX V5 Python.\n\n\`\`\`python\n${file.contents.slice(0, 12000)}\n\`\`\``
-      : undefined;
-
-    try {
-      const response = await fetch('/api/copilot/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, context }),
-      });
-      const data = await response.json();
-      if (data.error) {
-        setError(data.detail ? `${data.error} — ${data.detail}` : data.error);
-      } else {
-        setMessages((m) => [...m, { role: 'assistant', text: data.reply }]);
-      }
-    } catch {
-      setError('Could not reach the server');
-    } finally {
-      setBusy(false);
-    }
+  const onScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (stuck.current) setUnseen(0);
   };
 
-  if (enabled === false) {
-    return (
-      <div className="p-4 text-sm text-ink-dim">
-        <p className="mb-2 font-medium text-ink">Copilot is not enabled here.</p>
-        <p>
-          Start the server with{' '}
-          <span className="rounded bg-panel px-1 py-0.5 font-mono text-xs">VEXCOLLAB_COPILOT=1</span>{' '}
-          and sign in from Settings.
-        </p>
-      </div>
-    );
-  }
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const added = messages.length - seen.current;
+    seen.current = messages.length;
+    const mine = messages.at(-1)?.senderId === selfId;
+    if (stuck.current || mine) {
+      el.scrollTop = el.scrollHeight;
+      setUnseen(0);
+    } else if (added > 0) {
+      setUnseen((count) => count + added);
+    }
+  }, [messages, selfId]);
+
+  // Grow the box with what is typed, up to a few lines.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [draft]);
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    const failure = await onSend(text);
+    setSending(false);
+    if (failure) {
+      // Keep what was typed: losing a message to a hiccup is worse than the hiccup.
+      setError(failure);
+      return;
+    }
+    setError(null);
+    setDraft('');
+    stuck.current = true;
+    inputRef.current?.focus();
+  };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="vc-scroll flex-1 space-y-3 overflow-y-auto p-3">
-        {messages.length === 0 && !busy && (
-          <div className="pt-6 text-center text-[12px] leading-relaxed text-ink-dim">
-            <p className="mb-1 font-medium text-ink">Ask about your code</p>
-            <p>“Why does my auton drift right?”</p>
-            <p>“Write a PID turn using the inertial sensor.”</p>
-          </div>
-        )}
-
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={
-              message.role === 'user'
-                ? 'ml-6 rounded-xl rounded-br-sm bg-vex px-3 py-2 text-[12px] leading-relaxed text-white'
-                : 'mr-2 rounded-xl rounded-bl-sm bg-panel px-3 py-2 text-[12px] leading-relaxed'
-            }
-          >
-            <pre className="whitespace-pre-wrap font-sans">{message.text}</pre>
-          </div>
-        ))}
-
-        {busy && <div className="text-[12px] text-ink-dim">Thinking…</div>}
-        {error && (
-          <div className="rounded-lg bg-panel px-3 py-2 text-[11px] leading-relaxed text-vex">
-            {error}
-          </div>
-        )}
-        <div ref={endRef} />
+    <div className="flex h-full flex-col bg-panel">
+      <div className="shrink-0 border-b border-edge px-3.5 py-2">
+        <p className="text-[12px] font-medium">
+          Team chat <span className="font-normal text-ink-dim">· {people} here</span>
+        </p>
+        <p className="text-[11px] text-ink-dim">
+          {kept
+            ? 'This room keeps its chat.'
+            : 'Chat is gone when everyone leaves the room.'}
+        </p>
       </div>
 
-      <div className="border-t border-edge p-2">
-        <label className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] text-ink-dim">
-          <input
-            type="checkbox"
-            checked={includeFile}
-            onChange={(event) => setIncludeFile(event.target.checked)}
-            className="size-3 accent-vex"
-          />
-          Send the open file as context
-        </label>
-        <div className="flex gap-1.5">
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={listRef}
+          onScroll={onScroll}
+          className="vc-scroll h-full overflow-y-auto px-3 py-3"
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
+        >
+          {messages.length === 0 ? (
+            <p className="mt-10 px-4 text-center text-sm text-ink-dim">
+              No messages yet. Say something to everyone in this room.
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {messages.map((message, index) => {
+                const previous = messages[index - 1];
+                const mine = message.senderId === selfId;
+                const sameRun =
+                  previous &&
+                  previous.senderId === message.senderId &&
+                  message.at - previous.at < RUN_MS;
+                const color = safeColor(message.color);
+
+                return (
+                  <li
+                    key={message.id}
+                    className={`flex flex-col ${mine ? 'items-end' : 'items-start'} ${sameRun ? '' : 'pt-2.5'}`}
+                  >
+                    {!sameRun && (
+                      <div className="mb-0.5 flex items-baseline gap-1.5 px-1 text-[11px]">
+                        <span className="font-medium" style={{ color }}>
+                          {mine ? 'You' : message.name}
+                        </span>
+                        <span className="text-ink-dim">{clock.format(message.at)}</span>
+                      </div>
+                    )}
+                    <div
+                      className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-[13px] leading-snug ${
+                        mine ? 'bg-vex text-white' : 'bg-panel-raised shadow-[0_1px_2px_rgba(0,0,0,0.08)]'
+                      }`}
+                    >
+                      {linkify(message.text)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {unseen > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              const el = listRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+              setUnseen(0);
+            }}
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-ink px-3 py-1 text-[11px] font-medium text-shell shadow-lg"
+          >
+            {unseen} new {unseen === 1 ? 'message' : 'messages'} ↓
+          </button>
+        )}
+      </div>
+
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void send();
+        }}
+        className="shrink-0 border-t border-edge bg-panel p-2.5"
+      >
+        {error && (
+          <p role="alert" className="mb-1.5 px-1 text-[11px] text-vex">
+            {error}
+          </p>
+        )}
+        <div className="flex items-end gap-2">
           <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
+            ref={inputRef}
+            value={draft}
+            rows={1}
+            maxLength={MAX_LENGTH}
+            disabled={!connected}
+            enterKeyHint="send"
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (error) setError(null);
+            }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              // Enter sends, Shift+Enter makes a new line. Not while an input
+              // method is composing -- Enter there confirms a character.
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 void send();
               }
             }}
-            rows={2}
-            placeholder="Ask Copilot…"
-            aria-label="Ask Copilot"
-            className="vc-scroll min-w-0 flex-1 resize-none rounded-lg border border-edge bg-panel-raised px-2.5 py-1.5 text-[12px] outline-none placeholder:text-ink-dim focus:border-vex"
+            placeholder={connected ? 'Message the room' : 'Reconnecting…'}
+            aria-label="Message"
+            className="min-h-[38px] flex-1 resize-none rounded-xl border border-edge bg-panel-raised px-3 py-2 text-sm leading-snug outline-none focus:border-vex disabled:opacity-60"
           />
           <button
-            type="button"
-            onClick={send}
-            disabled={busy || !input.trim()}
-            className="shrink-0 self-end rounded-lg bg-vex px-3 py-2 text-[12px] font-medium text-white transition hover:bg-vex-soft disabled:opacity-40"
+            type="submit"
+            disabled={!connected || sending || !draft.trim()}
+            className="h-[38px] shrink-0 rounded-xl bg-vex px-4 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
           >
             Send
           </button>
         </div>
-      </div>
+        {draft.length > MAX_LENGTH * 0.8 && (
+          <p className="mt-1 px-1 text-right text-[10px] text-ink-dim">
+            {draft.length}/{MAX_LENGTH}
+          </p>
+        )}
+      </form>
     </div>
   );
 }

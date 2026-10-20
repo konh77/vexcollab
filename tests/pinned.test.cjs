@@ -358,3 +358,40 @@ test('an edit made in the room mid-sync is held, never written over the reposito
   assert.equal(racy.status.state, 'idle');
   await racy.stop();
 });
+
+test('chat history is kept across a restart, and a damaged file is ignored', async () => {
+  const { PinnedRoom } = await load();
+  const data = mkdtempSync(join(tmpdir(), 'vc-chat-'));
+  const config = { id: 'team', remote: null, repo: null, branch: 'main', token: null, author: AUTHOR, debounceMs: 1000, maxDelayMs: 1000, pollMs: 5000, passcodeHash: 'x' };
+
+  const first = new PinnedRoom({ config, dataDir: data, doc: new Y.Doc(), log: quiet });
+  await first.start();
+  first.chat.push({ id: 1, at: 1000, senderId: 'a', name: 'Ada', color: '#ff0000', text: 'hello' });
+  first.chat.push({ id: 2, at: 2000, senderId: 'b', name: 'Bo', color: '#00ff00', text: 'hi Ada' });
+  await first.stop(); // saves
+
+  const second = new PinnedRoom({ config, dataDir: data, doc: new Y.Doc(), log: quiet });
+  const array = second.chat;
+  await second.start();
+  assert.deepEqual(second.chat.map((m) => m.text), ['hello', 'hi Ada']);
+  assert.equal(second.chat, array, 'filled in place, so the server keeps pushing into the saved array');
+  await second.stop();
+
+  // A file that is not what this code wrote must not become messages in a live room.
+  writeFileSync(join(data, 'pinned', 'team', 'chat.json'), JSON.stringify([
+    { id: 1, at: 1, senderId: 'a', name: 'ok', text: 'fine' },
+    { id: 'x', at: 1, text: 5 },
+    null,
+    { text: 'no id' },
+  ]));
+  const third = new PinnedRoom({ config, dataDir: data, doc: new Y.Doc(), log: quiet });
+  await third.start();
+  assert.deepEqual(third.chat.map((m) => m.text), ['fine']);
+  await third.stop();
+
+  writeFileSync(join(data, 'pinned', 'team', 'chat.json'), '{not json');
+  const fourth = new PinnedRoom({ config, dataDir: data, doc: new Y.Doc(), log: quiet });
+  await fourth.start();
+  assert.deepEqual(fourth.chat, []);
+  await fourth.stop();
+});

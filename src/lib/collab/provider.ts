@@ -29,6 +29,39 @@ export interface PinnedStatus {
   pushing: boolean;
 }
 
+/** One line of team chat, as the server stamped it. */
+export interface ChatMessage {
+  id: number;
+  /** Milliseconds since the epoch. */
+  at: number;
+  /** Stable for a browser tab across reconnects; compare with `selfId` to know which are yours. */
+  senderId: string;
+  name: string;
+  color: string;
+  text: string;
+}
+
+/** The most messages kept on the page; the server holds fewer. */
+const CHAT_KEPT = 200;
+
+/**
+ * A random secret for this tab, hashed by the server into the id others see. It
+ * is never sent to anyone else, which is what stops a message being sent as you.
+ */
+function chatKey(): string {
+  try {
+    const existing = window.sessionStorage.getItem('vexcollab.chatkey');
+    if (existing) return existing;
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    const key = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    window.sessionStorage.setItem('vexcollab.chatkey', key);
+    return key;
+  } catch {
+    // Storage blocked: a key for this page load only, so a reload looks like a new person.
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+}
+
 /** Why the server wants a passcode: none was sent, or the one sent was wrong. */
 export type PasscodeReason = 'required' | 'wrong';
 
@@ -68,6 +101,9 @@ export class CollabProvider {
   private errorListeners = new Set<(message: string | null) => void>();
   private passcodeListeners = new Set<(reason: PasscodeReason | null) => void>();
   private pinnedListeners = new Set<(status: PinnedStatus | null) => void>();
+  private chatListeners = new Set<(messages: ChatMessage[], selfId: string | null) => void>();
+  private chatMessages: ChatMessage[] = [];
+  private selfId: string | null = null;
   private hasSynced = false;
   private destroyed = false;
   private readonly roomId: string;
@@ -149,6 +185,13 @@ export class CollabProvider {
       this.pinnedListeners.forEach((l) => l(status)),
     );
 
+    this.socket.on('chat', (message: ChatMessage) => {
+      // A join's history and a live message can overlap around a reconnect.
+      if (this.chatMessages.some((existing) => existing.id === message.id)) return;
+      this.chatMessages = [...this.chatMessages, message].slice(-CHAT_KEPT);
+      this.emitChat();
+    });
+
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload);
     }
@@ -162,8 +205,15 @@ export class CollabProvider {
   private join(passcode?: string) {
     this.socket.emit(
       'join',
-      { roomId: this.roomId, user: this.user, passcode },
-      (res: { update?: ArrayBuffer; error?: string; code?: string; pinned?: PinnedStatus }) => {
+      { roomId: this.roomId, user: this.user, passcode, key: chatKey() },
+      (res: {
+        update?: ArrayBuffer;
+        error?: string;
+        code?: string;
+        pinned?: PinnedStatus;
+        senderId?: string;
+        chat?: ChatMessage[];
+      }) => {
         if (this.destroyed) return;
 
         if (res?.code === 'passcode-required' || res?.code === 'wrong-passcode') {
@@ -191,6 +241,11 @@ export class CollabProvider {
         this.errorListeners.forEach((l) => l(null));
         this.passcodeListeners.forEach((l) => l(null));
         if (res.pinned) this.pinnedListeners.forEach((l) => l(res.pinned ?? null));
+        // Replace, not merge: this is the room's whole history, and merging it
+        // into what was already here after a reconnect would show things twice.
+        this.selfId = res.senderId ?? null;
+        this.chatMessages = (res.chat ?? []).slice(-CHAT_KEPT);
+        this.emitChat();
         if (passcode) rememberPasscode(this.roomId, passcode);
         Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
         this.broadcastLocalAwareness();
@@ -198,6 +253,29 @@ export class CollabProvider {
         this.syncedListeners.forEach((l) => l());
       },
     );
+  }
+
+  private emitChat() {
+    this.chatListeners.forEach((l) => l(this.chatMessages, this.selfId));
+  }
+
+  /** Sends a chat line. Resolves to null when it went through, or the reason it did not. */
+  sendChat(text: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      if (!this.socket.connected) return resolve('You are offline. Reconnecting…');
+      this.socket.timeout(8000).emit('chat', text, (error: Error | null, res?: { ok?: boolean; error?: string }) => {
+        if (error) return resolve('The message did not get through. Try again.');
+        resolve(res?.ok ? null : (res?.error ?? 'The message did not get through.'));
+      });
+    });
+  }
+
+  onChat(listener: (messages: ChatMessage[], selfId: string | null) => void) {
+    this.chatListeners.add(listener);
+    listener(this.chatMessages, this.selfId);
+    return () => {
+      this.chatListeners.delete(listener);
+    };
   }
 
   /** Sends a passcode the person typed. The result arrives through the listeners. */

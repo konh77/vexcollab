@@ -12,7 +12,7 @@
 import { createServer } from 'node:http';
 import { createServer as createSecureServer } from 'node:https';
 import { execFileSync } from 'node:child_process';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
@@ -73,6 +73,20 @@ const LIMITS = {
   maxDocBytes: num('VEXCOLLAB_MAX_DOC_BYTES', 2 * 1024 * 1024),
   /** Refuse to open new rooms once the heap is this full. */
   maxHeapBytes: num('VEXCOLLAB_MAX_HEAP_MB', 320) * 1024 * 1024,
+};
+
+/**
+ * Team chat. Messages live with the room: an ordinary room forgets them when it
+ * closes, a pinned room keeps them. Bounded so chat cannot grow a room without
+ * limit, and rate-limited per connection so one tab cannot flood everyone.
+ */
+const CHAT = {
+  maxLength: 1000,
+  history: 100,
+  /** At most this many messages... */
+  burst: 6,
+  /** ...in this many milliseconds. */
+  windowMs: 10_000,
 };
 
 const COOKIE = 'vexcollab_auth';
@@ -299,6 +313,21 @@ const pinnedRooms = new Map();
 
 const roomsCreatedByIp = new Map();
 
+/**
+ * One chat line, made safe to show to everyone. Control characters and the
+ * bidirectional overrides are removed: the first can garble a terminal or a
+ * log, and the second lets a message render backwards to disguise what it says.
+ * Returns null for a message with nothing in it, and an empty string is not one.
+ */
+function cleanChat(text) {
+  if (typeof text !== 'string' || text.length > CHAT.maxLength * 4) return null;
+  return text
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function countRoomsForIp(ip) {
   let n = 0;
   for (const room of rooms.values()) if (room.creatorIp === ip) n += 1;
@@ -357,6 +386,7 @@ function acquireRoom(roomId, ip) {
     measuredAt: 0,
     frozen: false,
     creatorIp: ip,
+    chat: [],
   };
   rooms.set(roomId, room);
   return { room };
@@ -483,8 +513,12 @@ io.use((socket, nextFn) => {
 io.on('connection', (socket) => {
   /** @type {string | null} */
   let joinedRoom = null;
+  /** @type {string} */
+  let senderId = socket.id;
+  /** Recent message times for this connection, for the rate limit. */
+  const sentAt = [];
 
-  socket.on('join', async ({ roomId, user, passcode }, ack) => {
+  socket.on('join', async ({ roomId, user, passcode, key: chatKey }, ack) => {
     if (typeof roomId !== 'string' || !roomId) return;
 
     const ip = socket.handshake.address ?? 'unknown';
@@ -526,6 +560,15 @@ io.on('connection', (socket) => {
 
     joinedRoom = key;
     room.lastActivity = Date.now();
+    // A stable identity for chat, so "that is me" survives a reconnect. The
+    // client keeps a random secret and only its hash is ever shared: another
+    // person sees the hash, cannot reverse it, and so cannot send a message that
+    // your own page would show as yours.
+    senderId =
+      typeof chatKey === 'string' && chatKey.length >= 16 && chatKey.length <= 128
+        ? createHash('sha256').update(chatKey).digest('hex').slice(0, 16)
+        : socket.id;
+
     room.peers.set(socket.id, {
       name: String(user?.name ?? 'Anonymous').slice(0, 32),
       color: String(user?.color ?? '#888888').slice(0, 9),
@@ -536,6 +579,8 @@ io.on('connection', (socket) => {
     ack?.({
       update: Y.encodeStateAsUpdate(room.doc),
       peerId: socket.id,
+      senderId,
+      chat: room.chat,
       pinned: room.pinned ? room.pinned.status : undefined,
     });
     io.to(key).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
@@ -571,6 +616,43 @@ io.on('connection', (socket) => {
     const room = rooms.get(joinedRoom);
     if (room) room.lastActivity = Date.now();
     socket.to(joinedRoom).emit('awareness', new Uint8Array(update));
+  });
+
+  socket.on('chat', (text, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = joinedRoom ? rooms.get(joinedRoom) : null;
+    const peer = room?.peers.get(socket.id);
+    // Only someone who got in -- past the passcode, where there is one -- can talk.
+    if (!room || !peer) return reply({ error: 'Join a room first.' });
+
+    const now = Date.now();
+    while (sentAt.length && now - sentAt[0] > CHAT.windowMs) sentAt.shift();
+    if (sentAt.length >= CHAT.burst) return reply({ error: 'Slow down a little.' });
+
+    const cleaned = cleanChat(text);
+    if (!cleaned) return reply({ error: 'Nothing to send.' });
+    if (cleaned.length > CHAT.maxLength) {
+      return reply({ error: `Messages are limited to ${CHAT.maxLength} characters.` });
+    }
+    sentAt.push(now);
+
+    // Name, colour and sender are the server's to say, not the client's: a
+    // message cannot be sent as somebody else.
+    const message = {
+      id: (room.chat.at(-1)?.id ?? 0) + 1,
+      at: now,
+      senderId,
+      name: peer.name,
+      color: peer.color,
+      text: cleaned,
+    };
+    room.chat.push(message);
+    if (room.chat.length > CHAT.history) room.chat.splice(0, room.chat.length - CHAT.history);
+    room.lastActivity = now;
+    room.pinned?.scheduleChatSave();
+
+    io.to(joinedRoom).emit('chat', message);
+    reply({ ok: true });
   });
 
   socket.on('disconnect', () => {
@@ -612,6 +694,8 @@ for (const config of pinnedConfigFile ? loadPinnedConfig(pinnedConfigFile) : [])
     frozen: false,
     creatorIp: 'pinned',
     pinned,
+    // The same array the pinned room saves, so history survives a restart.
+    chat: pinned.chat,
   });
   pinnedRooms.set(config.id, { config, pinned });
   void pinned.start();

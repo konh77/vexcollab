@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type * as Y from 'yjs';
-import { CollabProvider, type PasscodeReason, type Peer, type PinnedStatus } from './provider';
+import { CollabProvider, type ChatMessage, type PasscodeReason, type Peer, type PinnedStatus } from './provider';
 import { loadIdentity } from './identity';
 import { ensureStarterFiles, getFiles, listPaths } from './project';
 
@@ -21,6 +21,10 @@ export interface CollabState {
   passcode: PasscodeReason | null;
   /** Present only in a pinned room: how it is doing with its repository. */
   pinned: PinnedStatus | null;
+  /** The room's team chat, oldest first. */
+  messages: ChatMessage[];
+  /** Which messages are yours. Null until the room has been joined. */
+  selfId: string | null;
 }
 
 export function useCollab(roomId: string, templateId?: string | null): CollabState {
@@ -31,6 +35,8 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
   const [error, setError] = useState<string | null>(null);
   const [passcode, setPasscode] = useState<PasscodeReason | null>(null);
   const [pinned, setPinned] = useState<PinnedStatus | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [selfId, setSelfId] = useState<string | null>(null);
 
   useEffect(() => {
     const instance = new CollabProvider(roomId, loadIdentity());
@@ -41,6 +47,10 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
     const offError = instance.onError(setError);
     const offPasscode = instance.onPasscode(setPasscode);
     const offPinned = instance.onPinnedStatus(setPinned);
+    const offChat = instance.onChat((next, self) => {
+      setMessages(next);
+      setSelfId(self);
+    });
 
     const files = getFiles(instance.doc);
     const syncPaths = () => setPaths(listPaths(instance.doc));
@@ -62,6 +72,7 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
       offError();
       offPasscode();
       offPinned();
+      offChat();
       files.unobserve(syncPaths);
       instance.destroy();
       setProvider(null);
@@ -69,5 +80,5 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
-  return { provider, doc: provider?.doc ?? null, connected, peers, paths, error, passcode, pinned };
+  return { provider, doc: provider?.doc ?? null, connected, peers, paths, error, passcode, pinned, messages, selfId };
 }

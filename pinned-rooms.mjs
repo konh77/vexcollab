@@ -231,6 +231,14 @@ export class PinnedRoom {
     this.base = join(dataDir, 'pinned', config.id);
     this.repoDir = join(this.base, 'repo');
     this.snapshotFile = join(this.base, 'state.ystate');
+    this.chatFile = join(this.base, 'chat.json');
+
+    /**
+     * The room's chat history. The server keeps pushing into this same array, so
+     * it is what gets saved; it is never replaced, only filled in place.
+     */
+    this.chat = [];
+    this.chatTimer = null;
 
     this.ready = false;
     this.state = 'starting';
@@ -276,6 +284,7 @@ export class PinnedRoom {
   /** Brings the room up. Resolves once it is usable; keeps retrying if it cannot be. */
   async start() {
     await mkdir(this.base, { recursive: true, mode: 0o700 });
+    await this.loadChat();
 
     let restored = false;
     if (existsSync(this.snapshotFile)) {
@@ -335,7 +344,9 @@ export class PinnedRoom {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    if (this.chatTimer) clearTimeout(this.chatTimer);
     await this.saveSnapshot().catch(() => {});
+    await this.saveChat().catch(() => {});
   }
 
   markDirty() {
@@ -364,6 +375,39 @@ export class PinnedRoom {
       );
     }, 2000);
     this.snapshotTimer.unref?.();
+  }
+
+  async loadChat() {
+    try {
+      const parsed = JSON.parse(await readFile(this.chatFile, 'utf8'));
+      if (!Array.isArray(parsed)) return;
+      // Only well-formed messages: this file is read back into a live room.
+      const valid = parsed.filter(
+        (m) =>
+          m && Number.isInteger(m.id) && Number.isFinite(m.at) && typeof m.text === 'string' &&
+          typeof m.name === 'string' && typeof m.senderId === 'string',
+      );
+      this.chat.splice(0, this.chat.length, ...valid.slice(-200));
+    } catch {
+      // No history yet, or it could not be read; start with none.
+    }
+  }
+
+  scheduleChatSave() {
+    if (this.chatTimer || this.stopped) return;
+    this.chatTimer = setTimeout(() => {
+      this.chatTimer = null;
+      void this.saveChat().catch((error) =>
+        this.log(`  Pinned room "${this.config.id}": could not save its chat (${error.message}).`),
+      );
+    }, 2000);
+    this.chatTimer.unref?.();
+  }
+
+  async saveChat() {
+    const temporary = `${this.chatFile}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(this.chat), { mode: 0o600 });
+    await rename(temporary, this.chatFile);
   }
 
   async saveSnapshot() {
