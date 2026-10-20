@@ -99,6 +99,16 @@ export function EditorPane({
   const findingsRef = useRef(findings);
   findingsRef.current = findings;
   const prefs = usePrefs();
+  // A minimap takes a fifth of a phone's width and shows nothing legible, so it
+  // is dropped below tablet size whatever the preference says.
+  const [roomy, setRoomy] = useState(true);
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 768px)');
+    const update = () => setRoomy(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
   const appearance = resolveTheme(prefs.theme);
   const activeTheme =
     prefs.editorTheme === 'auto' ? autoTheme(appearance) : prefs.editorTheme;
@@ -262,7 +272,7 @@ export function EditorPane({
         fontLigatures: prefs.ligatures,
         wordWrap: prefs.wordWrap ? 'on' : 'off',
         lineNumbers: prefs.lineNumbers ? 'on' : 'off',
-        minimap: { enabled: prefs.minimap, renderCharacters: false, maxColumn: 80 },
+        minimap: { enabled: prefs.minimap && roomy, renderCharacters: false, maxColumn: 80 },
         scrollBeyondLastLine: false,
         smoothScrolling: true,
         cursorSmoothCaretAnimation: 'on',

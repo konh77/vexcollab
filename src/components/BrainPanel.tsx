@@ -65,6 +65,7 @@ export function BrainPanel({
   const [busyLabel, setBusyLabel] = useState('Working…');
   const [busy, setBusy] = useState(false);
   const [insecureContext, setInsecureContext] = useState(false);
+  const [appleMobile, setAppleMobile] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
@@ -94,6 +95,11 @@ export function BrainPanel({
   // reading it during render would desync hydration.
   useEffect(() => {
     setInsecureContext(!window.isSecureContext);
+    // iPadOS reports itself as a Mac, so it is told apart by having a touch screen.
+    setAppleMobile(
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
+    );
   }, []);
 
   if (snapshot.connectionState === 'unsupported') {
@@ -112,6 +118,18 @@ export function BrainPanel({
           <span className="rounded bg-panel px-1 py-0.5 font-mono text-xs">--https</span> and
           reopen this page over{' '}
           <span className="font-mono text-xs">https://</span>.
+        </p>
+      </div>
+    ) : appleMobile ? (
+      <div className="p-4 text-sm text-ink-dim">
+        <p className="mb-2 font-medium text-ink">An iPhone or iPad cannot connect a brain.</p>
+        <p className="mb-2">
+          Apple does not let any iOS or iPadOS browser talk to a USB device, so this is not
+          something Chrome or a different setting can fix.
+        </p>
+        <p>
+          Reading and editing code works here as normal. To upload to a robot, open this room on
+          a computer with Chrome or Edge — everything you wrote is already in the room.
         </p>
       </div>
     ) : (

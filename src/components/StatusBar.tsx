@@ -69,7 +69,7 @@ export function StatusBar({
   onOpenPalette,
 }: Props) {
   return (
-    <div className="flex shrink-0 items-center gap-4 border-t border-edge bg-panel px-3 py-1 text-[11px] text-ink-dim">
+    <div className="flex shrink-0 items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-edge bg-panel px-3 py-1 text-[11px] text-ink-dim [scrollbar-width:none] [&>*]:shrink-0 [&::-webkit-scrollbar]:hidden">
       <button
         type="button"
         onClick={onOpenPalette}

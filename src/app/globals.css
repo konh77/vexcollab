@@ -99,3 +99,38 @@ body {
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
+
+
+/*
+ * Phones and tablets.
+ */
+
+/* No double-tap-to-zoom delay on controls, and no grey flash when one is tapped. */
+button,
+a,
+[role='tab'],
+select,
+label {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Scrolling to the end of a panel must not drag the whole page or reload it. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+@media (pointer: coarse) {
+  /*
+   * iOS zooms the page in when a field under 16px takes focus, and does not
+   * zoom back. Monaco's real input is a hidden textarea sized to the editor's
+   * font, so it needs the same treatment as every visible field.
+   */
+  input:not([type='checkbox']):not([type='range']),
+  textarea,
+  select,
+  .monaco-editor .inputarea {
+    font-size: 16px !important;
+  }
+}

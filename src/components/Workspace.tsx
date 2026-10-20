@@ -60,6 +60,9 @@ export function Workspace({
   // Markdown files open as a rendered page; Edit switches to the source.
   const [markdownView, setMarkdownView] = useState<'preview' | 'edit'>('preview');
   const [rail, setRail] = useState<'brain' | 'chat'>('brain');
+  // Below 1024px there is room for one thing at a time, so this says which. On a
+  // desktop every pane is visible regardless and this only picks the right rail.
+  const [pane, setPane] = useState<'files' | 'code' | 'output' | 'brain' | 'chat'>('code');
   const [searchOpen, setSearchOpen] = useState(false);
   const [reveal, setReveal] = useState<{ line: number; nonce: number } | null>(null);
 
@@ -84,6 +87,9 @@ export function Workspace({
   const openFile = useCallback((path: string) => {
     setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
     setActive(path);
+    // Picking a file from the file list, a search hit or a traceback means "show
+    // me that" -- on a phone that is the editor, not the list it was chosen from.
+    setPane((current) => (current === 'files' || current === 'output' ? 'code' : current));
   }, []);
 
   /** Opens a file and, when a line is given, scrolls to it. */
@@ -130,6 +136,18 @@ export function Workspace({
     },
     [doc, analysis.devices, paths, jumpTo],
   );
+
+  /**
+   * Show or hide the terminal. Beside the editor on a desktop that is a toggle;
+   * below 1024px it is its own screen, so "show it" means go there.
+   */
+  const toggleTerminal = useCallback(() => {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      setShowTerminal((value) => !value);
+    } else {
+      setPane((current) => (current === 'output' ? 'code' : 'output'));
+    }
+  }, []);
 
   const closeTab = useCallback(
     (path: string) => {
@@ -223,7 +241,7 @@ export function Workspace({
         label: showTerminal ? 'Hide the terminal' : 'Show the terminal',
         group: 'View',
         hint: '⌘J',
-        run: () => setShowTerminal((v) => !v),
+        run: toggleTerminal,
       },
       {
         id: 'terminal.port',
@@ -242,7 +260,11 @@ export function Workspace({
         id: 'view.chat',
         label: rail === 'chat' ? 'Show the brain panel' : 'Ask Copilot about this code',
         group: 'View',
-        run: () => setRail((r) => (r === 'chat' ? 'brain' : 'chat')),
+        run: () => {
+          const next = rail === 'chat' ? 'brain' : 'chat';
+          setRail(next);
+          setPane(next);
+        },
       },
       {
         id: 'app.settings',
@@ -301,7 +323,7 @@ export function Workspace({
       }
       if (mod && event.key.toLowerCase() === 'j') {
         event.preventDefault();
-        setShowTerminal((v) => !v);
+        toggleTerminal();
       }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
@@ -333,8 +355,8 @@ export function Workspace({
         : 'No brain';
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="vc-vibrancy z-10 flex items-center gap-3 border-b border-edge px-4 py-2">
+    <div className="flex h-dvh flex-col">
+      <header className="vc-vibrancy z-10 flex items-center gap-2 border-b border-edge px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-3 sm:px-4">
         <a href="/" className="text-sm font-semibold">
           VEX<span className="text-vex">Collab</span>
         </a>
@@ -343,7 +365,7 @@ export function Workspace({
           type="button"
           onClick={copyLink}
           title="Copy the room link"
-          className="rounded-md bg-panel px-2.5 py-1 font-mono text-[11px] text-ink-dim transition hover:text-ink"
+          className="max-w-[34vw] truncate rounded-md bg-panel px-2.5 py-1 font-mono text-[11px] text-ink-dim transition hover:text-ink sm:max-w-none"
         >
           {copied ? 'link copied' : roomId}
         </button>
@@ -353,11 +375,12 @@ export function Workspace({
           onClick={() => setPaletteOpen(true)}
           className="rounded-md bg-panel px-2.5 py-1 text-[11px] text-ink-dim transition hover:text-ink"
         >
-          Search or run a command  ⌘K
+          <span className="hidden lg:inline">Search or run a command  ⌘K</span>
+          <span className="lg:hidden">Search</span>
         </button>
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex -space-x-1.5">
+          <div className="hidden -space-x-1.5 sm:flex">
             {peers.map((peer) => (
               <span
                 key={peer.id}
@@ -369,11 +392,11 @@ export function Workspace({
               </span>
             ))}
           </div>
-          <span className="text-xs text-ink-dim">{connected ? `${peers.length} here` : 'offline'}</span>
+          <span className="hidden text-xs text-ink-dim sm:inline">{connected ? `${peers.length} here` : 'offline'}</span>
           <button
             type="button"
             onClick={() => setShowTerminal((value) => !value)}
-            className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+            className="hidden rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge lg:inline-flex"
           >
             {showTerminal ? 'Hide terminal' : 'Show terminal'}
           </button>
@@ -393,7 +416,7 @@ export function Workspace({
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.31.43.53.77.6H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            Settings
+            <span className="hidden sm:inline">Settings</span>
           </button>
           <button
             type="button"
@@ -404,7 +427,8 @@ export function Workspace({
             }}
             className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
           >
-            Leave room
+            <span className="hidden sm:inline">Leave room</span>
+            <span className="sm:hidden">Leave</span>
           </button>
         </div>
       </header>
@@ -416,7 +440,11 @@ export function Workspace({
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-48 shrink-0 flex-col border-r border-edge bg-panel">
+        <aside
+          className={`${
+            pane === 'files' ? 'flex w-full' : 'hidden'
+          } shrink-0 flex-col border-r border-edge bg-panel md:flex md:w-48`}
+        >
           {doc && (
             <>
               <div className="min-h-0 flex-1">
@@ -438,7 +466,15 @@ export function Workspace({
           )}
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main
+          className={`${
+            pane === 'code' || pane === 'output'
+              ? 'flex'
+              : pane === 'files'
+                ? 'hidden md:flex'
+                : 'hidden lg:flex'
+          } min-w-0 flex-1 flex-col`}
+        >
           <EditorTabs
             open={openTabs.filter((t) => paths.includes(t))}
             active={activePath}
@@ -468,7 +504,7 @@ export function Workspace({
             </div>
           )}
 
-          <div className="min-h-0 flex-1">
+          <div className={`min-h-0 flex-1 ${pane === 'output' ? 'hidden lg:block' : ''}`}>
             {showPreview && doc ? (
               <MarkdownPreview doc={doc} path={activePath} paths={paths} onOpenFile={openFile} />
             ) : provider ? (
@@ -489,22 +525,31 @@ export function Workspace({
             )}
           </div>
 
-          {showTerminal && (
-            <div className="h-56 shrink-0 border-t border-edge">
-              <TerminalPane
-                terminal={terminal}
-                output={output}
-                isOpen={isOpen}
-                series={series}
-                onClear={clear}
-                onJump={jumpTo}
-              />
-            </div>
-          )}
+          {/* Beside the editor on a desktop; its own screen below 1024px. */}
+          <div
+            className={`${
+              pane === 'output' ? 'min-h-0 flex-1' : 'hidden'
+            } border-t border-edge lg:h-56 lg:flex-none lg:shrink-0 ${
+              showTerminal ? 'lg:block' : 'lg:hidden'
+            }`}
+          >
+            <TerminalPane
+              terminal={terminal}
+              output={output}
+              isOpen={isOpen}
+              series={series}
+              onClear={clear}
+              onJump={jumpTo}
+            />
+          </div>
         </main>
 
-        <aside className="flex w-80 shrink-0 flex-col border-l border-edge bg-shell">
-          <div className="flex shrink-0 gap-1 border-b border-edge bg-panel p-1">
+        <aside
+          className={`${
+            pane === 'brain' || pane === 'chat' ? 'flex min-w-0 flex-1' : 'hidden'
+          } flex-col border-l border-edge bg-shell lg:flex lg:w-80 lg:flex-none lg:shrink-0`}
+        >
+          <div className="hidden shrink-0 gap-1 border-b border-edge bg-panel p-1 lg:flex">
             {(['brain', 'chat'] as const).map((tab) => (
               <button
                 key={tab}
@@ -554,6 +599,46 @@ export function Workspace({
         pinned={pinned}
         onOpenPalette={() => setPaletteOpen(true)}
       />
+
+      {/* Below 1024px only one pane fits, so this is how you move between them. */}
+      <nav
+        aria-label="Sections"
+        className="flex shrink-0 border-t border-edge bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden"
+      >
+        {(
+          [
+            { id: 'files', label: 'Files', phoneOnly: true },
+            { id: 'code', label: 'Code' },
+            { id: 'output', label: 'Output' },
+            { id: 'brain', label: 'Brain' },
+            { id: 'chat', label: 'Chat' },
+          ] as const
+        ).map((item) => {
+          // On a tablet the file list is always beside the editor, so "Files"
+          // would just be a second way to reach what is already on screen.
+          const current = pane === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              aria-current={current ? 'page' : undefined}
+              onClick={() => {
+                setPane(item.id);
+                if (item.id === 'brain' || item.id === 'chat') setRail(item.id);
+              }}
+              className={`min-h-12 flex-1 px-1 text-[12px] font-medium transition ${
+                'phoneOnly' in item && item.phoneOnly ? 'md:hidden' : ''
+              } ${current ? 'text-vex' : 'text-ink-dim'} ${
+                // Files-as-a-screen only exists on a phone; on a tablet that
+                // state is simply the editor beside the file list.
+                item.id === 'code' && pane === 'files' ? 'md:text-vex' : ''
+              }`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
 
       {passcode && provider && (
         <PasscodeGate

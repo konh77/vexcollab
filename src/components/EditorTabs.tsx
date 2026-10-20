@@ -43,7 +43,7 @@ export function EditorTabs({ open, active, problemsByPath, onSelect, onClose }: 
                 event.stopPropagation();
                 onClose(path);
               }}
-              className="rounded px-0.5 text-ink-dim opacity-0 transition group-hover:opacity-100 hover:bg-edge hover:text-ink"
+              className="rounded px-0.5 text-ink-dim opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-edge hover:text-ink"
             >
               ✕
             </button>

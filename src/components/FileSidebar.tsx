@@ -27,6 +27,9 @@ export function FileSidebar({ doc, paths, active, onSelect, onMoved }: Props) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // The file whose "move to" choices are open. Dragging does not work on most
+  // touch screens, so a tap has to be able to do the same job.
+  const [moving, setMoving] = useState<string | null>(null);
 
   useEffect(() => {
     if (!note) return;
@@ -161,14 +164,14 @@ export function FileSidebar({ doc, paths, active, onSelect, onMoved }: Props) {
               setOver(null);
             }}
             {...target(dir)}
-            className={`group flex items-center px-2 transition ${dir ? 'pl-4' : ''} ${
+            className={`group flex flex-wrap items-center px-2 transition ${dir ? 'pl-4' : ''} ${
               dragging === path ? 'opacity-40' : ''
             } ${over === dir && dragging !== null ? 'bg-vex/10' : ''}`}
           >
             <button
               type="button"
               onClick={() => onSelect(path)}
-              className={`flex-1 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition ${
+              className={`flex-1 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition [@media(pointer:coarse)]:py-2.5 ${
                 path === active
                   ? 'bg-panel-raised font-medium text-ink shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
                   : 'text-ink-dim hover:text-ink'
@@ -179,15 +182,51 @@ export function FileSidebar({ doc, paths, active, onSelect, onMoved }: Props) {
             {path !== 'main.py' && (
               <button
                 type="button"
+                aria-label={`Move ${path}`}
+                aria-expanded={moving === path}
+                onClick={() => setMoving((current) => (current === path ? null : path))}
+                className="hidden px-1.5 py-1 text-xs text-ink-dim hover:text-ink [@media(hover:none)]:block"
+              >
+                Move
+              </button>
+            )}
+            {path !== 'main.py' && (
+              <button
+                type="button"
                 aria-label={`Delete ${path}`}
                 onClick={() => {
                   deleteFile(doc, path);
                   if (path === active) onSelect('main.py');
                 }}
-                className="px-1.5 text-xs text-ink-dim opacity-0 transition group-hover:opacity-100 hover:text-vex"
+                className="px-1.5 text-xs text-ink-dim opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-vex"
               >
                 ✕
               </button>
+            )}
+
+            {moving === path && (
+              <div className="flex basis-full flex-wrap gap-1.5 px-2 pb-2 pt-1">
+                {dirs
+                  .filter((candidate) => candidate !== dirname(path))
+                  .map((candidate) => (
+                    <button
+                      key={candidate || '<top>'}
+                      type="button"
+                      onClick={() => {
+                        setMoving(null);
+                        drop(path, candidate);
+                      }}
+                      className="rounded-md bg-panel-raised px-2.5 py-1.5 text-xs shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition hover:text-vex"
+                    >
+                      {candidate ? `${candidate}/` : 'Top level'}
+                    </button>
+                  ))}
+                {dirs.filter((candidate) => candidate !== dirname(path)).length === 0 && (
+                  <span className="text-[11px] text-ink-dim">
+                    No other folder yet. Name a file lib/new.py to make one.
+                  </span>
+                )}
+              </div>
             )}
           </li>
           )),
