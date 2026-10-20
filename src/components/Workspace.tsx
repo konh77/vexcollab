@@ -182,15 +182,16 @@ export function Workspace({
       run: () => openFile(path),
     }));
 
-    // Deliberately no upload or run here: those move a robot, and a command
+    // Deliberately no upload or run here: these need their full controls, and a command
     // palette is one keystroke away from an accident.
     const actions: Command[] = [
       {
         id: 'brain.connect',
         label: snapshot.connectionState === 'connected' ? 'Disconnect brain' : 'Connect brain over USB',
         group: 'Brain',
+        disabled: Boolean(snapshot.transfer) || snapshot.connectionState === 'connecting',
         run: () =>
-          snapshot.connectionState === 'connected' ? void session.disconnect() : void session.connect(),
+          snapshot.transfer ? undefined : snapshot.connectionState === 'connected' ? void session.disconnect() : void session.connect(),
       },
       {
         id: 'brain.stop',

@@ -20,6 +20,8 @@ import { V5SerialDevice } from '@/lib/v5-serial-protocol/VexDevice';
 import { ProgramIniConfig } from '@/lib/v5-serial-protocol/VexIniConfig';
 import { compareVersions, parseVersion } from './firmware';
 import { EMPTY_SNAPSHOT, type BrainFile, type BrainSnapshot, type UploadRequest } from './types';
+import { MAX_PROGRAM_BYTES } from './upload';
+import { isV5Bytecode } from './bytecode';
 
 const VEX_USB_VENDOR_ID = 0x2888;
 
@@ -253,6 +255,9 @@ export class V5Session {
       // ports behind our back — including the one the terminal wants. We
       // notice the unplug ourselves instead.
       device.autoReconnect = false;
+      // Its 200 ms auto-refresh bypasses our exclusive queue and can inject a
+      // status reply into a file transfer. This session owns all polling.
+      device.autoRefresh = false;
 
       if (!(await device.connect(connection))) {
         await connection.close();
@@ -526,8 +531,13 @@ export class V5Session {
     const device = this.device;
     if (!device?.isConnected) return;
     try {
-      const programs = (await device.brain.listProgram()) ?? [];
+      const programs = await device.brain.listProgram();
+      if (!programs) throw new Error('The brain did not return its program list. Try Refresh.');
+      if (programs.some((p) => !Number.isInteger(p.slot) || p.slot < 0 || p.slot > 7)) {
+        throw new Error('Could not identify every program slot. Reconnect before uploading.');
+      }
       this.patch({
+        programsLoaded: true,
         programs: programs.map((p) => ({
           name: p.name,
           binfile: p.binfile,
@@ -537,6 +547,7 @@ export class V5Session {
         })),
       });
     } catch (error) {
+      this.patch({ programsLoaded: false });
       this.fail(error, 'Reading program slots failed');
     }
   }
@@ -684,14 +695,41 @@ export class V5Session {
     return this.exclusive(async () => {
       const device = this.device;
       const conn = this.connection;
-      if (!device?.isConnected || !conn) return false;
+      if (!device?.isConnected || !conn) {
+        this.patch({ lastError: 'Connect the V5 Brain before uploading.' });
+        return false;
+      }
+      if (!Number.isInteger(request.slot) || request.slot < 1 || request.slot > 8 ||
+          request.payload.byteLength === 0 || request.payload.byteLength > MAX_PROGRAM_BYTES ||
+          (request.coldPayload !== undefined &&
+            (request.coldPayload.byteLength === 0 || request.coldPayload.byteLength > MAX_PROGRAM_BYTES))) {
+        this.patch({ lastError: 'Choose slot 1–8 and a non-empty compiled program no larger than 2 MiB.' });
+        return false;
+      }
+      if (request.format === 'mpy') {
+        if (!isV5Bytecode(request.payload) || request.vendor !== undefined || request.coldPayload !== undefined) {
+          this.patch({ lastError: 'Compile this Python program with MicroPython 1.13 before uploading.' });
+          return false;
+        }
+        try {
+          const runtimeFiles = await device.brain.listFiles(64);
+          if (!runtimeFiles?.some(file => file.filename === 'python_vm.bin' && file.size > 0 && file.loadAddress === 0x03800000)) {
+            this.patch({ lastError: 'Python runtime not found. Download a Python program once using VEXcode to install it, then reconnect here.' });
+            return false;
+          }
+        } catch (error) {
+          this.fail(error, 'Could not check the Python runtime');
+          return false;
+        }
+      }
 
       const ini = new ProgramIniConfig();
-      ini.autorun = true;
+      // Uploading must not start motors. Running is a separate deliberate action.
+      ini.autorun = false;
       ini.baseName = `slot_${request.slot}`;
       ini.project.ide = 'VEXCollab';
-      ini.program.name = request.name.slice(0, MAX_PROGRAM_NAME);
-      ini.program.description = request.description.slice(0, 256);
+      ini.program.name = request.name.replace(/[\r\n"\x00-\x1f]/g, ' ').trim().slice(0, MAX_PROGRAM_NAME) || 'VEXCollab';
+      ini.program.description = request.description.replace(/[\r\n"\x00-\x1f]/g, ' ').slice(0, 256);
       ini.program.slot = (request.slot - 1) as ZerobaseSlotNumber;
       ini.program.icon = programIcon(this.snapshot.cpu0Version);
       ini.setProgramDate(new Date());
@@ -711,7 +749,7 @@ export class V5Session {
           // is the point, so carry on rather than failing here.
         }
         this.patch({ transfer: { label: 'Starting', current: 0, total: 1 } });
-        if (request.vendor === undefined) {
+        if (request.vendor === undefined && request.format !== 'mpy') {
           // The library's own path: ini and bin under FileVendor.USER.
           const ok = await device.brain.uploadProgram(
             ini,
@@ -720,19 +758,20 @@ export class V5Session {
             (label, current, total) => this.patch({ transfer: { label, current, total } }),
           );
           if (ok) await this.refreshProgramsLocked();
+          else this.patch({ lastError: 'The brain did not complete the upload. Check the USB cable and try again.' });
           return Boolean(ok);
         }
 
-        // Same two files, but written under a chosen vendor. uploadProgramToDevice
-        // hardcodes USER and passes the field under the wrong name, so there is no
-        // way to reach VEXVM through it.
+        // Python bytecode lives in USER flash and links to the existing VEXVM
+        // runtime. The VM itself is neither downloaded nor overwritten here.
+        // The lower-level path also supports an explicitly chosen vendor.
         const base = ini.baseName;
         const iniOk = await conn.uploadFileToDevice(
           {
             filename: `${base}.ini`,
             buf: new TextEncoder().encode(ini.createIni()),
             downloadTarget: FileDownloadTarget.FILE_TARGET_QSPI,
-            vendor: request.vendor,
+            vendor: request.vendor ?? 1,
             autoRun: false,
           },
           (current, total) => this.patch({ transfer: { label: 'INI', current, total } }),
@@ -747,9 +786,14 @@ export class V5Session {
             filename: `${base}.bin`,
             buf: request.payload,
             downloadTarget: FileDownloadTarget.FILE_TARGET_QSPI,
-            vendor: request.vendor,
-            exttype: 'bin',
-            autoRun: true,
+            vendor: request.vendor ?? 1,
+            exttype: request.format === 'mpy' ? 'bina' : 'bin',
+            ...(request.format === 'mpy' ? {
+              loadAddress: 0x07000000,
+              linkedFile: { filename: 'python_vm.bin', vendor: 64,
+                downloadTarget: FileDownloadTarget.FILE_TARGET_QSPI, autoRun: false },
+            } : {}),
+            autoRun: false,
           },
           (current, total) => this.patch({ transfer: { label: 'BIN', current, total } }),
         );

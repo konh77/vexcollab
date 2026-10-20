@@ -70,12 +70,16 @@ export interface BrainSnapshot {
   rawDevices: { port: number; type: number; version: number }[];
   controllers: ControllerView[];
   programs: ProgramView[];
+  /** False until a complete program listing has been read from this brain. */
+  programsLoaded: boolean;
   /** Non-null while a file transfer is in flight. */
   transfer: { label: string; current: number; total: number } | null;
   lastError: string | null;
 }
 
 export interface UploadRequest {
+  /** MPY bytecode links to the Python runtime already installed on the brain. */
+  format?: 'mpy';
   slot: SlotNumber;
   name: string;
   description: string;
@@ -128,6 +132,7 @@ export const EMPTY_SNAPSHOT: BrainSnapshot = {
   rawDevices: [],
   controllers: [],
   programs: [],
+  programsLoaded: false,
   transfer: null,
   lastError: null,
 };

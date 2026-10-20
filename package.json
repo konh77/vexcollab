@@ -9,7 +9,10 @@
     "build": "next build",
     "start": "NODE_ENV=production node server.mjs",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --require ./scripts/register-typescript.cjs --test tests/*.test.cjs",
+    "test:brain": "node scripts/brain-smoke.cjs",
+    "setup:compiler": "node scripts/setup-compiler.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

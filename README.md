@@ -33,13 +33,28 @@ The robot connects to **your computer**, even when you use the hosted website.
 
 1. Turn on the brain and connect it to your computer by USB.
 2. Click **Connect USB** in the robot panel and select the VEX port.
-3. To upload a program, build it in **VEXcode** first.
-4. In **Upload**, choose the resulting **`.bin` file**, select a slot, and click
-   **Upload**. Use the robot controls to run or stop the program.
+3. In **Upload to brain**, choose how the program is built:
 
-**VEXCollab uploads compiled `.bin` files. It does not compile Python or upload
-`.py` source directly to the brain.** Editing code in a room does not change an
+**Editor code** (no file needed). The room's Python is combined into one
+program, `main.py` last, and compiled to MicroPython bytecode by the server.
+Nothing is picked from disk, and editing the room changes what gets uploaded.
+**Compile & download** saves the bytecode without a brain attached, which is
+also the way to see the whole build working with no hardware present.
+
+**Compiled file.** Build in **VEXcode**, then drop or browse for the resulting
+`.bin`. The name comes from the filename. Editing the room does not change an
 already compiled `.bin`; rebuild it before uploading your changes.
+
+Either way, the first empty slot is selected once the brain's slots have
+loaded. If all eight are occupied, choose one explicitly; the panel shows which
+program will be replaced. **Upload to slot …** leaves the program stopped — use
+**Run** in **Programs on the brain** to start it.
+
+Two limits on the Editor code path. The server needs the compiler installed
+(`npm run setup:compiler`, see below) — the hosted site has it or the panel
+says so. And the brain needs its Python runtime already present, which VEXcode
+installs the first time you download any Python program to it; without it the
+upload is refused rather than left to fail on the robot.
 
 For program output, open the terminal and click **Open user port**. The V5 uses
 separate serial connections for robot commands and program output. Numeric
@@ -101,10 +116,36 @@ Ctrl/⌘ + S does **not** save a room to GitHub. Use **Save session to GitHub**.
 | A room has disappeared | Start another room and reopen your saved GitHub project. A room link cannot restore unsaved code. |
 | The editor does not load | Check your internet connection; the editor loads external assets. GitHub and Copilot also require internet access. |
 
-USB connection, identity, battery/firmware queries, and file transfer have been
-checked on a real V5 brain. Python-source upload and screen capture were removed
-after hardware testing. If another robot feature fails, [open an issue](https://github.com/konh77/vexcollab/issues)
+USB connection, identity, battery/firmware queries, program listing, and queued
+refreshes were verified on a V5 brain running vexOS 1.1.5 on 2026-09-08.
+A multi-chunk file-transfer test failed during overlapping background polling;
+the session now disables the library's independent polling. A successful
+hardware transfer with that fix is still unverified. Python-source upload and
+screen capture were removed after earlier hardware testing.
+If another robot feature fails, [open an issue](https://github.com/konh77/vexcollab/issues)
 with your browser, vexOS version, and the steps to reproduce it.
+
+## Check an upload change
+
+Run `npm test`, `npm run typecheck`, and `npm run build`. The tests exercise the
+app's upload implementation with a simulated connection: validation, slot
+selection, failure/retry handling, serialized transfers, and disabled autorun.
+They do not prove that a binary is executable on hardware.
+
+For an optional real-USB check on macOS/Linux, close other apps or browser tabs
+using the brain, then pass its serial device paths:
+
+```sh
+npm run test:brain -- /dev/cu.usbmodem1101 /dev/cu.usbmodem1103
+```
+
+Use the paths present on your computer. This uses Python 3's standard library
+for the USB transport and the same V5 session code as the app. The default test
+only reads identity, status, and program slots. Add `--transfer` to write and
+read back a temporary 9,003-byte text file, then remove it; this never starts a
+program or overwrites an existing program slot. Stop any running program first.
+If a test is interrupted, `--cleanup-test-files` removes leftover test files
+only after verifying their exact name pattern, size, and contents.
 
 ## Run on your computer
 
@@ -120,6 +161,21 @@ npx github:konh77/vexcollab
 The first run installs dependencies and builds the app. Open the printed
 `http://localhost:3000` link. Teammates on the same network can use the printed
 Wi-Fi address; keep the server running while you work.
+
+### Compiling Python on your own server
+
+The **Editor code** upload mode compiles on the server, so a self-hosted
+instance needs the compiler built once. It is not bundled: it is built from
+pinned MicroPython 1.13 source (MIT) rather than shipped as a binary.
+
+```bash
+npm run setup:compiler
+```
+
+This needs `git`, `make` and a C compiler, and writes `mpy-cross` into
+`.vexcollab-tools/` (git-ignored). Set `VEXCOLLAB_MPY_CROSS` to use a compiler
+from somewhere else. Until it is installed, **Editor code** reports that the
+compiler is missing and **Compiled file** keeps working.
 
 ### Launcher options
 

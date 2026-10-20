@@ -4,7 +4,7 @@
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SlotNumber } from '@/lib/v5-serial-protocol/Vex';
 import type { DeclaredDevice, Warning } from '@/lib/editor/useAnalysis';
 import { FieldMap } from './FieldMap';
@@ -13,13 +13,15 @@ import { firmwareState } from '@/lib/vex/firmware';
 import type { V5Session } from '@/lib/vex/session';
 import type { Series } from '@/lib/vex/telemetry';
 import type { BrainFile, BrainSnapshot } from '@/lib/vex/types';
+import { findEmptySlot, inferProgramName, validateProgramFile } from '@/lib/vex/upload';
+import { isV5Bytecode } from '@/lib/vex/bytecode';
 
 const SLOTS: SlotNumber[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
 interface Props {
   session: V5Session;
   snapshot: BrainSnapshot;
-  /** Bundles every .py file in the room into the program to upload. */
+  /** Captures the current room's Python source at build time. */
   getProgram: () => string;
   programFileCount: number;
   declaredDevices: DeclaredDevice[];
@@ -63,10 +65,12 @@ export function BrainPanel({
   onJump,
   onAssignDevice,
 }: Props) {
-  const [slot, setSlot] = useState<SlotNumber>(1);
+  const [slot, setSlot] = useState<SlotNumber | null>(null);
   const [programName, setProgramName] = useState('VEXCollab');
   const [description, setDescription] = useState('Uploaded from the browser');
   const [binFile, setBinFile] = useState<File | null>(null);
+  const [uploadMode, setUploadMode] = useState<'editor' | 'file'>('editor');
+  const [busyLabel, setBusyLabel] = useState('Working…');
   const [busy, setBusy] = useState(false);
   const [insecureContext, setInsecureContext] = useState(false);
   const [latestFirmware, setLatestFirmware] = useState<string | null>(null);
@@ -76,8 +80,29 @@ export function BrainPanel({
   const [filesLoaded, setFilesLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const slotChosen = useRef(false);
+  const uploadInFlight = useRef(false);
 
   const connected = snapshot.connectionState === 'connected';
+  const connecting = snapshot.connectionState === 'connecting';
+  const operationBusy = busy || Boolean(snapshot.transfer);
+
+  useEffect(() => {
+    if (!connected || !snapshot.programsLoaded || slotChosen.current) return;
+    setSlot(findEmptySlot(snapshot.programs));
+    // A full brain deliberately keeps the placeholder until the user picks a slot.
+    slotChosen.current = true;
+  }, [connected, snapshot.programsLoaded, snapshot.programs]);
+
+  useEffect(() => {
+    if (!connected) {
+      setUploadSuccess(null);
+      setSlot(null);
+      slotChosen.current = false;
+    }
+  }, [connected]);
 
   // Read after mount: window.isSecureContext has no server-side equivalent and
   // reading it during render would desync hydration.
@@ -130,21 +155,106 @@ export function BrainPanel({
   }
 
   const upload = async () => {
-    if (!binFile) return;
+    if (slot === null || !connected || !snapshot.programsLoaded || operationBusy || uploadInFlight.current) return;
+    if (uploadMode === 'file' && !binFile) return;
+    if (uploadMode === 'editor' && !programFileCount) return;
+    const invalid = uploadMode === 'file' && binFile ? validateProgramFile(binFile) : null;
+    if (invalid) {
+      setBuildError(invalid);
+      return;
+    }
+    if (!programName.trim()) {
+      setBuildError('Give the program a name before uploading.');
+      return;
+    }
+    uploadInFlight.current = true;
     setBusy(true);
     setBuildError(null);
+    setUploadSuccess(null);
     try {
-      await session.upload({
+      setBusyLabel(uploadMode === 'editor' ? 'Compiling…' : 'Reading file…');
+      const payload = uploadMode === 'editor'
+        ? await compileEditor()
+        : new Uint8Array(await binFile!.arrayBuffer());
+      setBusyLabel('Uploading…');
+      const ok = await session.upload({
         slot,
-        name: programName,
+        name: programName.trim(),
         description,
-        payload: new Uint8Array(await binFile.arrayBuffer()),
+        payload,
+        ...(uploadMode === 'editor' ? { format: 'mpy' as const } : {}),
       });
+      if (ok) {
+        setUploadSuccess(`${programName.trim()} uploaded to slot ${slot}. Use Run below when you are ready.`);
+      } else {
+        setBuildError(session.getSnapshot().lastError ?? 'Upload did not finish. Check the USB connection and try again.');
+      }
     } catch (error) {
       setBuildError(error instanceof Error ? error.message : String(error));
     } finally {
+      uploadInFlight.current = false;
       setBusy(false);
     }
+  };
+
+  const compileEditor = async (): Promise<Uint8Array> => {
+    const response = await fetch('/api/compile', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: getProgram() }), signal: AbortSignal.timeout(20_000),
+    });
+    const result = await response.json();
+    if (!response.ok || typeof result.bytecode !== 'string') {
+      throw new Error(result.error || 'Compilation failed. Try again.');
+    }
+    const bytes = Uint8Array.from(atob(result.bytecode), character => character.charCodeAt(0));
+    if (!isV5Bytecode(bytes)) throw new Error('The server returned incompatible Python bytecode.');
+    return bytes;
+  };
+
+  const downloadBuild = async () => {
+    if (operationBusy || uploadInFlight.current || !programFileCount) return;
+    uploadInFlight.current = true;
+    setBusy(true);
+    setBusyLabel('Compiling…');
+    setBuildError(null);
+    setUploadSuccess(null);
+    try {
+      const bytes = await compileEditor();
+      const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${programName.replace(/[^\w-]/g, '_') || 'program'}.mpy`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setUploadSuccess(`Compiled ${bytes.length.toLocaleString()} bytes. Downloaded Python bytecode; connect the Brain to compile and upload directly.`);
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : String(error));
+    } finally {
+      uploadInFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  const chooseProgram = (file: File | undefined) => {
+    if (!file || operationBusy) return;
+    setUploadSuccess(null);
+    const invalid = validateProgramFile(file);
+    setBuildError(invalid);
+    if (invalid) {
+      setBinFile(null);
+      return;
+    }
+    setBinFile(file);
+    setProgramName(inferProgramName(file.name));
+  };
+
+  const exportPython = () => {
+    const url = URL.createObjectURL(new Blob([getProgram()], { type: 'text/x-python;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'vexcollab-main.py';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const updateFirmware = async () => {
@@ -231,11 +341,12 @@ export function BrainPanel({
         <button
           type="button"
           onClick={() => (connected ? session.disconnect() : session.connect())}
+          disabled={operationBusy || connecting}
           className={`ml-auto rounded-md px-3 py-1 text-xs font-medium transition ${
             connected ? 'bg-panel hover:bg-edge' : 'bg-vex text-white hover:bg-vex-soft'
-          }`}
+          } disabled:opacity-50`}
         >
-          {connected ? 'Disconnect' : 'Connect USB'}
+          {connected ? 'Disconnect' : connecting ? 'Connecting…' : 'Connect USB'}
         </button>
       </div>
 
@@ -282,6 +393,192 @@ export function BrainPanel({
           </div>
         </div>
       )}
+
+      <Section title="Upload to brain">
+        <div className="space-y-3 text-sm">
+          <div className="flex gap-1 rounded-lg bg-panel p-1" role="group" aria-label="Program source">
+            {(['editor', 'file'] as const).map(mode => (
+              <button type="button" key={mode} disabled={operationBusy} aria-pressed={uploadMode === mode}
+                onClick={() => { setUploadMode(mode); setBuildError(null); setUploadSuccess(null); }}
+                className={`flex-1 rounded-md px-2 py-1.5 text-xs transition disabled:opacity-50 ${uploadMode === mode ? 'bg-panel-raised text-ink shadow-sm' : 'text-ink-dim'}`}>
+                {mode === 'editor' ? 'Editor code' : 'Compiled file'}
+              </button>
+            ))}
+          </div>
+          {uploadMode === 'editor' ? (
+            <div className="space-y-2 text-[12px] leading-relaxed text-ink-dim">
+              <p>Compile the current Python code and send it straight to your Brain. No file to choose.</p>
+              <p>{programFileCount} Python {programFileCount === 1 ? 'file' : 'files'} · MicroPython 1.13</p>
+              <button type="button" onClick={downloadBuild} disabled={operationBusy || !programFileCount}
+                className="w-full rounded-lg border border-edge px-3 py-2 font-medium text-ink transition hover:bg-panel disabled:opacity-50">
+                Compile & download
+              </button>
+            </div>
+          ) : <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (!operationBusy) setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              if (operationBusy) return;
+              if (event.dataTransfer.files.length > 1) {
+                setBuildError('Choose one compiled .bin file at a time.');
+                setUploadSuccess(null);
+                return;
+              }
+              chooseProgram(event.dataTransfer.files[0]);
+            }}
+            className={`rounded-lg border border-dashed px-3 py-3 transition ${
+              dragging ? 'border-vex bg-panel' : 'border-edge bg-panel'
+            }`}
+          >
+            <label htmlFor="brain-program-file" className="block text-[12px] font-medium">
+              {binFile ? binFile.name : 'Drop your .bin here, or browse'}
+            </label>
+            {binFile && (
+              <p className="mt-1 text-[11px] text-ink-dim">
+                {binFile.size < 1024
+                  ? `${binFile.size} bytes`
+                  : `${(binFile.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB`}
+                {' · Ready to upload'}
+              </p>
+            )}
+            <input
+              id="brain-program-file"
+              type="file"
+              accept=".bin"
+              disabled={operationBusy}
+              onChange={(event) => {
+                chooseProgram(event.target.files?.[0]);
+                // Selecting a rebuilt file with the same name must fire again.
+                event.target.value = '';
+              }}
+              className="mt-2 w-full text-[11px] disabled:opacity-50"
+            />
+          </div>}
+
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-ink-dim">Program name</span>
+            <input
+              value={programName}
+              maxLength={23}
+              disabled={operationBusy}
+              onChange={(event) => {
+                setProgramName(event.target.value);
+                setBuildError(null);
+                setUploadSuccess(null);
+              }}
+              placeholder="Program name"
+              className="w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 outline-none focus:border-vex disabled:opacity-50"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-ink-dim">Program slot</span>
+            <select
+              value={slot ?? ''}
+              disabled={operationBusy || connecting || (connected && !snapshot.programsLoaded)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSlot(value ? Number(value) as SlotNumber : null);
+                slotChosen.current = Boolean(value);
+                setBuildError(null);
+                setUploadSuccess(null);
+              }}
+              className="w-full rounded-md border border-edge bg-panel px-2.5 py-1.5 disabled:opacity-50"
+            >
+              <option value="">
+                {connected && !snapshot.programsLoaded ? 'Reading program slots…' : 'Choose a slot'}
+              </option>
+              {SLOTS.map((value) => {
+                const existing = snapshot.programs.find((program) => program.slot === value);
+                return (
+                  <option key={value} value={value}>
+                    Slot {value}{snapshot.programsLoaded ? ` — ${existing?.name || 'Empty'}` : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+
+          {connected && snapshot.programsLoaded && slot === null && findEmptySlot(snapshot.programs) === null && (
+            <p className="text-[11px] leading-relaxed text-ink-dim">
+              All eight slots are in use. Choose the program you want to replace.
+            </p>
+          )}
+          {connected && slot !== null && snapshot.programs.some((program) => program.slot === slot) && (
+            <p className="text-[11px] leading-relaxed text-ink-dim">
+              Uploading replaces {snapshot.programs.find((program) => program.slot === slot)?.name || 'the program'} in slot {slot}.
+            </p>
+          )}
+
+          <details className="text-[11px] text-ink-dim">
+            <summary className="cursor-pointer">Description</summary>
+            <input
+              value={description}
+              maxLength={256}
+              disabled={operationBusy}
+              onChange={(event) => setDescription(event.target.value)}
+              aria-label="Program description"
+              placeholder="Optional description"
+              className="mt-2 w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 text-ink outline-none focus:border-vex disabled:opacity-50"
+            />
+          </details>
+
+          {buildError && (
+            <p role="alert" className="rounded-lg bg-panel px-2.5 py-2 text-[12px] leading-relaxed text-vex">
+              {buildError}
+            </p>
+          )}
+          {uploadSuccess && (
+            <p role="status" className="rounded-lg bg-panel px-2.5 py-2 text-[12px] leading-relaxed text-ok">
+              {uploadSuccess}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => connected ? void upload() : void session.connect()}
+            disabled={operationBusy || connecting || (connected && ((uploadMode === 'file' ? !binFile : !programFileCount) || slot === null || !programName.trim() || !snapshot.programsLoaded))}
+            className="w-full rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
+          >
+            {operationBusy
+              ? busyLabel
+              : connecting
+                ? 'Connecting…'
+                : !connected
+                  ? 'Connect USB'
+                  : uploadMode === 'file' && !binFile
+                    ? 'Choose a .bin file'
+                    : slot === null
+                      ? 'Choose a slot'
+                      : `${uploadMode === 'editor' ? 'Compile & upload' : 'Upload'} to slot ${slot}`}
+          </button>
+          <p className="text-[11px] leading-relaxed text-ink-dim">
+            {uploadMode === 'editor' ? 'Rebuilds the current editor code on every upload. ' : ''}
+            Leaves the program stopped. Use Run below to start it.
+          </p>
+
+          <details className="border-t border-edge pt-2 text-[11px] text-ink-dim">
+            <summary className="cursor-pointer">Python build details</summary>
+            <p className="mt-2 leading-relaxed">
+              Python files are combined into one program, with main.py last, then compiled.
+              Functions share one namespace. The Brain needs the Python runtime installed by VEXcode.
+            </p>
+            <button
+              type="button"
+              onClick={exportPython}
+              disabled={programFileCount === 0}
+              className="mt-2 rounded-md bg-panel px-2.5 py-1.5 text-ink transition hover:bg-edge disabled:opacity-50"
+            >
+              Export Python ({programFileCount} {programFileCount === 1 ? 'file' : 'files'})
+            </button>
+          </details>
+        </div>
+      </Section>
 
       <Section title="Field position">
         <FieldMap series={telemetry} />
@@ -423,72 +720,6 @@ export function BrainPanel({
             </Section>
           )}
 
-          <Section title="Upload">
-            <div className="space-y-2 text-sm">
-              <label className="flex items-center justify-between gap-2">
-                <span className="text-ink-dim">Slot</span>
-                <select
-                  value={slot}
-                  onChange={(event) => setSlot(Number(event.target.value) as SlotNumber)}
-                  className="rounded-md bg-panel px-2 py-1"
-                >
-                  {SLOTS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <input
-                value={programName}
-                onChange={(event) => setProgramName(event.target.value)}
-                aria-label="Program name"
-                placeholder="Program name"
-                className="w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 outline-none focus:border-vex"
-              />
-              <input
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                aria-label="Program description"
-                placeholder="Description"
-                className="w-full rounded-md border border-edge bg-panel-raised px-2.5 py-1.5 outline-none focus:border-vex"
-              />
-
-              <div className="rounded-lg bg-panel px-2.5 py-2">
-                <label className="block text-[11px] font-medium">Program file</label>
-                <input
-                  type="file"
-                  accept=".bin"
-                  onChange={(event) => setBinFile(event.target.files?.[0] ?? null)}
-                  className="mt-1 w-full text-[11px]"
-                />
-                {binFile ? (
-                  <p className="mt-1 text-[11px] leading-relaxed text-ok">
-                    Uploading <span className="font-medium">{binFile.name}</span> (
-                    {Math.round(binFile.size / 1024)} KB) to slot {slot}.
-                  </p>
-                ) : (
-                  <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">
-                    Build in VEXcode and pick the <code>.bin</code> it produces. A slot holds
-                    compiled code, so source cannot be uploaded directly — tested, and the
-                    brain refuses it.
-                  </p>
-                )}
-              </div>
-
-
-              <button
-                type="button"
-                onClick={upload}
-                disabled={busy || !binFile || Boolean(snapshot.transfer)}
-                className="w-full rounded-lg bg-vex px-3 py-2 text-sm font-medium text-white transition hover:bg-vex-soft disabled:opacity-50"
-              >
-                {binFile ? `Upload ${binFile.name} to slot ${slot}` : 'Choose a .bin first'}
-              </button>
-            </div>
-          </Section>
-
           <Section title="Match control">
             <p className="mb-2 text-[11px] leading-relaxed text-ink-dim">
               Drives the competition state machine directly — test autonomous without a
@@ -500,7 +731,8 @@ export function BrainPanel({
                   key={mode}
                   type="button"
                   onClick={() => session.setMatchMode(mode)}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium capitalize transition ${
+                  disabled={operationBusy}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium capitalize transition disabled:opacity-50 ${
                     snapshot.matchMode === mode
                       ? mode === 'autonomous'
                         ? 'bg-warn text-shell'
@@ -526,14 +758,15 @@ export function BrainPanel({
               <button
                 type="button"
                 onClick={() => session.refreshPrograms()}
-                className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+                disabled={operationBusy}
+                className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge disabled:opacity-50"
               >
                 Refresh
               </button>
               <button
                 type="button"
                 onClick={() => session.stopProgram()}
-                disabled={!snapshot.isRunningProgram}
+                disabled={operationBusy || !snapshot.isRunningProgram}
                 className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge disabled:opacity-40"
               >
                 Stop running program
@@ -556,7 +789,8 @@ export function BrainPanel({
                     <button
                       type="button"
                       onClick={() => session.runProgram(program.slot as SlotNumber)}
-                      className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+                      disabled={operationBusy}
+                      className="rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge disabled:opacity-50"
                     >
                       Run
                     </button>
@@ -564,6 +798,7 @@ export function BrainPanel({
                       type="button"
                       aria-label={`Delete ${program.name}`}
                       title={`Delete ${program.name} from slot ${program.slot}`}
+                      disabled={operationBusy}
                       onClick={() => {
                         // Deleting from a brain is not undoable, so make it a
                         // deliberate act rather than a stray click.
@@ -574,7 +809,7 @@ export function BrainPanel({
                           setConfirmDelete(program.binfile);
                         }
                       }}
-                      className={`rounded-md px-2 py-1 text-xs transition ${
+                      className={`rounded-md px-2 py-1 text-xs transition disabled:opacity-50 ${
                         confirmDelete === program.binfile
                           ? 'bg-vex text-white'
                           : 'text-ink-dim hover:bg-panel hover:text-vex'
@@ -591,11 +826,12 @@ export function BrainPanel({
           <Section title="Files on the brain">
             <button
               type="button"
+              disabled={operationBusy}
               onClick={async () => {
                 setBrainFiles(await session.listBrainFiles());
                 setFilesLoaded(true);
               }}
-              className="mb-2 rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge"
+              className="mb-2 rounded-md bg-panel px-2.5 py-1 text-xs transition hover:bg-edge disabled:opacity-50"
             >
               {filesLoaded ? 'Refresh' : 'List files'}
             </button>
