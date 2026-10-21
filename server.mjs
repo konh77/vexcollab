@@ -20,6 +20,7 @@ import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
 import { PinnedRoom, loadPinnedConfig, verifyPasscode } from './pinned-rooms.mjs';
+import { visiblePeers } from './room-peers.mjs';
 
 // Load .env.local before anything reads process.env. Node has done this
 // natively since 21.7, so no dotenv dependency is needed. Values already in the
@@ -356,7 +357,9 @@ function dropRoom(roomId, reason) {
 function acquireRoom(roomId, ip) {
   const existing = rooms.get(roomId);
   if (existing) {
-    if (existing.peers.size >= LIMITS.maxPeersPerRoom) {
+    // People, not connections: a tab that reconnected is still one person, and
+    // its dead predecessor must not use up a seat until the heartbeat notices.
+    if (visiblePeers(existing.peers).length >= LIMITS.maxPeersPerRoom) {
       return { error: `This session is full (${LIMITS.maxPeersPerRoom} people).` };
     }
     return { room: existing };
@@ -491,6 +494,11 @@ const io = new SocketServer(httpServer, {
   // Deflate costs CPU the Pi would rather spend elsewhere, and binary CRDT
   // updates barely compress.
   perMessageDeflate: false,
+  // How fast a connection that vanished without saying goodbye -- a laptop that
+  // slept, a phone that lost signal -- stops being counted as someone in the
+  // room. The default is 25s + 20s; this is about 20s.
+  pingInterval: 10_000,
+  pingTimeout: 10_000,
   // Same-origin only in production. The client connects to its own origin, so
   // there is no legitimate cross-origin socket.
   cors: { origin: dev ? '*' : false },
@@ -572,6 +580,9 @@ io.on('connection', (socket) => {
     room.peers.set(socket.id, {
       name: String(user?.name ?? 'Anonymous').slice(0, 32),
       color: String(user?.color ?? '#888888').slice(0, 9),
+      senderId,
+      idle: false,
+      joinedAt: Date.now(),
     });
     socket.join(key);
 
@@ -583,7 +594,7 @@ io.on('connection', (socket) => {
       chat: room.chat,
       pinned: room.pinned ? room.pinned.status : undefined,
     });
-    io.to(key).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
+    io.to(key).emit('peers', visiblePeers(room.peers));
     // Existing peers re-broadcast awareness so the newcomer sees their cursors.
     socket.to(key).emit('announce-awareness');
   });
@@ -616,6 +627,18 @@ io.on('connection', (socket) => {
     const room = rooms.get(joinedRoom);
     if (room) room.lastActivity = Date.now();
     socket.to(joinedRoom).emit('awareness', new Uint8Array(update));
+  });
+
+  // A tab says whether anyone is actually there, so someone who walked away and
+  // left it open can be shown as away rather than counted as here.
+  socket.on('presence', (state) => {
+    const room = joinedRoom ? rooms.get(joinedRoom) : null;
+    const peer = room?.peers.get(socket.id);
+    if (!room || !peer) return;
+    const idle = Boolean(state?.idle);
+    if (peer.idle === idle) return;
+    peer.idle = idle;
+    io.to(joinedRoom).emit('peers', visiblePeers(room.peers));
   });
 
   socket.on('chat', (text, ack) => {
@@ -663,7 +686,7 @@ io.on('connection', (socket) => {
     if (room.peers.size === 0) {
       dropRoom(joinedRoom); // a no-op for a pinned room
     } else {
-      io.to(joinedRoom).emit('peers', [...room.peers].map(([id, u]) => ({ id, ...u })));
+      io.to(joinedRoom).emit('peers', visiblePeers(room.peers));
     }
   });
 });

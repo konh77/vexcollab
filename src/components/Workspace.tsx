@@ -82,6 +82,11 @@ export function Workspace({
 
   // A cheap signature of the whole project: changes whenever any file's text
   // does, which is what re-triggers analysis.
+  // People actually at their screens. A tab left open and untouched is shown as
+  // away, and is not counted as someone who is here.
+  const here = peers.filter((peer) => !peer.idle).length;
+  const away = peers.length - here;
+
   const projectSignature = doc
     ? readAllFiles(doc).map((f) => `${f.path}:${f.contents.length}`).join('|')
     : '';
@@ -497,18 +502,28 @@ export function Workspace({
 
         <div className="ml-auto flex items-center gap-2">
           <div className="hidden -space-x-1.5 sm:flex">
-            {peers.map((peer) => (
-              <span
-                key={peer.id}
-                title={peer.name}
-                style={{ backgroundColor: peer.color }}
-                className="grid size-6 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
-              >
-                {peer.name.charAt(0).toUpperCase()}
-              </span>
-            ))}
+            {/* You first, so a row of identical letters still says which one is you. */}
+            {[...peers]
+              .sort((a, b) => Number(b.senderId === selfId) - Number(a.senderId === selfId))
+              .map((peer) => {
+                const mine = peer.senderId === selfId;
+                return (
+                  <span
+                    key={peer.id}
+                    title={`${peer.name}${mine ? ' (you)' : ''}${peer.idle ? ' — away' : ''}`}
+                    style={{ backgroundColor: /^#[0-9a-f]{6}$/i.test(peer.color) ? peer.color : '#8e8e93' }}
+                    className={`grid size-6 place-items-center rounded-full border-2 text-[10px] font-semibold text-white transition ${
+                      mine ? 'border-ink' : 'border-white'
+                    } ${peer.idle ? 'opacity-40' : ''}`}
+                  >
+                    {peer.name.charAt(0).toUpperCase()}
+                  </span>
+                );
+              })}
           </div>
-          <span className="hidden text-xs text-ink-dim sm:inline">{connected ? `${peers.length} here` : 'offline'}</span>
+          <span className="hidden text-xs text-ink-dim sm:inline">
+            {connected ? `${here} here${away > 0 ? ` · ${away} away` : ''}` : 'offline'}
+          </span>
           <button
             type="button"
             onClick={() => setShowTerminal((value) => !value)}
@@ -719,7 +734,7 @@ export function Workspace({
               messages={messages}
               selfId={selfId}
               connected={connected}
-              people={peers.length}
+              people={here}
               kept={Boolean(pinned)}
               onSend={(text) => (provider ? provider.sendChat(text) : Promise.resolve('Not connected yet.'))}
             />
@@ -731,7 +746,7 @@ export function Workspace({
         path={activePath}
         cursor={cursor}
         problems={problems}
-        peers={peers.length}
+        peers={here}
         connected={connected}
         brainState={brainState}
         copilot={copilot}

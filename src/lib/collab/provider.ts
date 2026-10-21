@@ -12,7 +12,16 @@ export interface Peer {
   id: string;
   name: string;
   color: string;
+  /** Stable for a tab across reconnects; matches `selfId` for the viewer's own entry. */
+  senderId: string;
+  /** True when nobody has been at that tab for a while. */
+  idle: boolean;
 }
+
+/** A hidden tab counts as away after this long. */
+const AWAY_HIDDEN_MS = 60_000;
+/** A visible tab nobody has touched counts as away after this long. */
+const AWAY_UNTOUCHED_MS = 10 * 60_000;
 
 export interface LocalUser {
   name: string;
@@ -102,6 +111,10 @@ export class CollabProvider {
   private passcodeListeners = new Set<(reason: PasscodeReason | null) => void>();
   private pinnedListeners = new Set<(status: PinnedStatus | null) => void>();
   private chatListeners = new Set<(messages: ChatMessage[], selfId: string | null) => void>();
+  private lastTouched = Date.now();
+  private hiddenSince: number | null = null;
+  private away = false;
+  private stopWatchingPresence: (() => void) | null = null;
   private chatMessages: ChatMessage[] = [];
   private selfId: string | null = null;
   private hasSynced = false;
@@ -194,7 +207,50 @@ export class CollabProvider {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload);
+      this.watchPresence();
     }
+  }
+
+  /**
+   * Tells the server whether anyone is actually at this tab. A tab left open
+   * overnight, or buried behind others, is not "here" -- counting it is how a
+   * room ends up showing four people when one is working.
+   */
+  private watchPresence() {
+    const touch = () => {
+      this.lastTouched = Date.now();
+      // Coming back should show immediately, not on the next check.
+      if (this.away) this.updatePresence();
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    for (const event of events) window.addEventListener(event, touch, { passive: true });
+
+    const onVisibility = () => {
+      this.hiddenSince = document.hidden ? Date.now() : null;
+      if (!document.hidden) touch();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    this.hiddenSince = document.hidden ? Date.now() : null;
+    const timer = setInterval(() => this.updatePresence(), 10_000);
+
+    // Every provider that is built must also be able to take its listeners
+    // back: a room is left and rejoined in one page, and each would otherwise
+    // keep listening on the window for the rest of its life.
+    this.stopWatchingPresence = () => {
+      for (const event of events) window.removeEventListener(event, touch);
+      document.removeEventListener('visibilitychange', onVisibility);
+      clearInterval(timer);
+    };
+  }
+
+  private updatePresence() {
+    const now = Date.now();
+    const away =
+      (this.hiddenSince !== null && now - this.hiddenSince >= AWAY_HIDDEN_MS) ||
+      now - this.lastTouched >= AWAY_UNTOUCHED_MS;
+    if (away === this.away) return;
+    this.away = away;
+    if (this.socket.connected) this.socket.emit('presence', { idle: away });
   }
 
   /**
@@ -244,6 +300,8 @@ export class CollabProvider {
         // Replace, not merge: this is the room's whole history, and merging it
         // into what was already here after a reconnect would show things twice.
         this.selfId = res.senderId ?? null;
+        // A new connection starts as "here"; say so if this tab is actually away.
+        if (this.away) this.socket.emit('presence', { idle: true });
         this.chatMessages = (res.chat ?? []).slice(-CHAT_KEPT);
         this.emitChat();
         if (passcode) rememberPasscode(this.roomId, passcode);
@@ -344,6 +402,7 @@ export class CollabProvider {
       window.removeEventListener('beforeunload', this.handleUnload);
     }
     this.handleUnload();
+    this.stopWatchingPresence?.();
     this.awareness.destroy();
     this.socket.disconnect();
     this.doc.destroy();
