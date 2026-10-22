@@ -24,6 +24,7 @@ import { FileSidebar } from './FileSidebar';
 import { GitHubPanel } from './GitHubPanel';
 import { HelpPanel } from './HelpPanel';
 import { PasscodeGate } from './PasscodeGate';
+import { RepositoryPanel } from './RepositoryPanel';
 import { MarkdownPreview } from './MarkdownPreview';
 import { StatusBar } from './StatusBar';
 import { TerminalPane } from './TerminalPane';
@@ -592,9 +593,16 @@ export function Workspace({
                   }}
                 />
               </div>
-              {/* A pinned room commits itself to its repository, so a place to paste
-                  a personal token here would only be a second, worse way to do it. */}
-              {!pinned && <GitHubPanel doc={doc} roomId={roomId} />}
+              {/* A pinned room is connected to its repository by the server, with its
+                  own token, so there is no box here to paste a personal one. What
+                  it gets instead is a way to pull and push on demand. */}
+              {pinned ? (
+                provider && (
+                  <RepositoryPanel status={pinned} onSync={(action) => provider.syncPinned(action)} />
+                )
+              ) : (
+                <GitHubPanel doc={doc} roomId={roomId} />
+              )}
             </>
           )}
         </aside>

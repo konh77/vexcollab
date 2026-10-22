@@ -36,6 +36,8 @@ export interface PinnedStatus {
   lastSyncAt: number | null;
   /** False when the room is only kept on the server, with no repository. */
   pushing: boolean;
+  /** owner/name, for display. */
+  repo: string | null;
 }
 
 /** One line of team chat, as the server stamped it. */
@@ -325,6 +327,27 @@ export class CollabProvider {
         if (error) return resolve('The message did not get through. Try again.');
         resolve(res?.ok ? null : (res?.error ?? 'The message did not get through.'));
       });
+    });
+  }
+
+  /**
+   * Pull from or push to the room's repository now. Resolves to what happened in
+   * words, and whether it worked. The server can take a while on a slow network,
+   * so this waits longer than a chat message does.
+   */
+  syncPinned(action: 'pull' | 'push'): Promise<{ ok: boolean; summary: string }> {
+    return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        return resolve({ ok: false, summary: 'You are offline. Reconnecting…' });
+      }
+      this.socket
+        .timeout(180_000)
+        .emit('pinned-sync', { action }, (error: Error | null, res?: { ok: boolean; summary: string }) => {
+          if (error || !res) {
+            return resolve({ ok: false, summary: 'No answer from the server. It may still be working.' });
+          }
+          resolve(res);
+        });
     });
   }
 

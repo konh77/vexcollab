@@ -209,6 +209,35 @@ async function readTree(root) {
   return found;
 }
 
+// --- telling a person what a sync did ----------------------------------------
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * One plain sentence for the button someone pressed.
+ * @param {'pull' | 'push'} action
+ * @param {{ state: string, message: string | null, pulled: number, pushed: number } | undefined} result
+ * @returns {{ ok: boolean, summary: string }}
+ */
+export function describeSync(action, result) {
+  if (!result) return { ok: false, summary: 'This room is not connected to a repository.' };
+
+  if (result.state === 'conflict') {
+    return { ok: false, summary: result.message ?? 'The room and the repository disagree about the same lines.' };
+  }
+  if (result.state === 'error') {
+    return { ok: false, summary: result.message ?? 'Something went wrong talking to the repository.' };
+  }
+
+  const pulled = result.pulled > 0 ? `Pulled changes to ${plural(result.pulled, 'file')}.` : null;
+  if (action === 'pull') {
+    return { ok: true, summary: pulled ?? 'Already up to date with the repository.' };
+  }
+  const pushed = result.pushed > 0 ? `Pushed ${plural(result.pushed, 'commit')}.` : null;
+  if (pushed && pulled) return { ok: true, summary: `${pushed} ${pulled}` };
+  return { ok: true, summary: pushed ?? pulled ?? 'Nothing new to push — the repository already has everything.' };
+}
+
 // --- the pinned room ---------------------------------------------------------
 
 export class PinnedRoom {
@@ -270,6 +299,8 @@ export class PinnedRoom {
       lastPushAt: this.lastPushAt,
       lastSyncAt: this.lastSyncAt,
       pushing: Boolean(this.config.repo || this.config.remote),
+      /** For display. Shown only to people already past the passcode. */
+      repo: this.config.repo ?? null,
       ready: this.ready,
     };
   }
@@ -516,23 +547,31 @@ export class PinnedRoom {
    * aborted and reported rather than resolved by guessing -- both sides survive
    * untouched and a person decides.
    */
-  async cycle() {
-    if (!this.ready || this.stopped || !this.hasRemote()) return;
+  /**
+   * @param {{ push?: boolean }} [options] `push: false` fetches and brings the
+   *   repository's changes into the room but sends nothing back.
+   * @returns the outcome, or undefined if there was nothing to do
+   */
+  async cycle(options = {}) {
+    if (!this.ready || this.stopped || !this.hasRemote()) return undefined;
     // One at a time: two would fight over the working tree. A caller that
     // arrives mid-cycle waits for it and then gets a full pass of its own, so
     // whatever it changed just before calling is included.
     while (this.current) await this.current.catch(() => {});
-    this.current = this.runCycle().finally(() => {
+    this.current = this.runCycle(options).finally(() => {
       this.current = null;
     });
     return this.current;
   }
 
-  async runCycle() {
+  async runCycle({ push = true } = {}) {
     this.dirty = false;
     this.dirtySince = null;
     this.lastCycleAt = Date.now();
     this.setState('syncing');
+
+    // What this pass actually did, so a person who pressed a button is told.
+    const outcome = { pulled: 0, pushed: 0 };
 
     try {
       const snapshot = readRoomFiles(this.doc);
@@ -568,16 +607,16 @@ export class PinnedRoom {
               'conflict',
               'The repository and this room both changed the same lines. Nothing was overwritten. Resolve it in the repository, or copy your changes aside and re-save.',
             );
-            return;
+            return { ...outcome, state: this.state, message: this.message };
           }
-          await this.importChanges(snapshot);
+          outcome.pulled += await this.importChanges(snapshot);
         }
       } else if (remoteExists && !hasHead) {
         await this.git(['checkout', '-B', branch, remoteRef]);
-        await this.importChanges(snapshot);
+        outcome.pulled += await this.importChanges(snapshot);
       }
 
-      if (hasHead || (await this.git(['rev-parse', '--verify', '-q', 'HEAD'], { allowFailure: true })).ok) {
+      if (push && (hasHead || (await this.git(['rev-parse', '--verify', '-q', 'HEAD'], { allowFailure: true })).ok)) {
         const ahead = remoteExists
           ? Number((await this.git(['rev-list', '--count', `${remoteRef}..HEAD`])).stdout)
           : 1;
@@ -585,6 +624,7 @@ export class PinnedRoom {
           const pushed = await this.git(['push', 'origin', `HEAD:refs/heads/${branch}`], { allowFailure: true });
           if (!pushed.ok) throw new Error(`Could not push: ${this.scrub(pushed.error)}`);
           this.lastPushAt = Date.now();
+          outcome.pushed = ahead;
         }
       }
 
@@ -603,6 +643,7 @@ export class PinnedRoom {
       this.setState('error', this.scrub(error));
       this.log(`  Pinned room "${this.config.id}": ${this.scrub(error)}`);
     }
+    return { ...outcome, state: this.state, message: this.message };
   }
 
   /** A held file is released once the room and the repository agree about it again. */
@@ -652,6 +693,7 @@ export class PinnedRoom {
   async importChanges(snapshot) {
     const tree = await readTree(this.repoDir);
     const files = this.doc.getMap(FILES_KEY);
+    let changed = 0;
 
     this.doc.transact(() => {
       for (const [path, contents] of tree) {
@@ -661,6 +703,7 @@ export class PinnedRoom {
             const text = new Y.Text();
             text.insert(0, contents);
             files.set(path, text);
+            changed += 1;
           } else if (!isText(current) || current.toString() !== contents) {
             this.held.add(path); // made in the room meanwhile, and differently
           }
@@ -668,6 +711,7 @@ export class PinnedRoom {
           if (isText(current) && current.toString() === snapshot.get(path)) {
             current.delete(0, current.length);
             current.insert(0, contents);
+            changed += 1;
           } else {
             this.held.add(path); // edited in the room since the snapshot
           }
@@ -676,10 +720,13 @@ export class PinnedRoom {
       for (const [path, before] of snapshot) {
         if (tree.has(path)) continue;
         const current = files.get(path);
-        if (isText(current) && current.toString() === before) files.delete(path);
-        else if (current) this.held.add(path); // edited in the room, deleted in the repository
+        if (isText(current) && current.toString() === before) {
+          files.delete(path);
+          changed += 1;
+        } else if (current) this.held.add(path); // edited in the room, deleted in the repository
       }
     }, PINNED_ORIGIN);
+    return changed;
   }
 
   beginTimer() {

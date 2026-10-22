@@ -286,6 +286,11 @@ a passcode or token never has to be committed. The server reads
   for changes made elsewhere. It never force-pushes. If the room and the
   repository changed the same file, that file is held — neither side is
   overwritten — and the status bar says why until the two match again.
+- **Pull and Push buttons.** In the file list's GitHub box. *Pull* brings the
+  repository's changes into the room and sends nothing back; *Push* saves the
+  room to the repository now, pulling anything new first. Each says what it did
+  ("Pulled changes to 2 files", "Pushed 1 commit", or why it could not). Anyone
+  past the passcode can use them, as they can edit the room.
 - Optional: `debounceSeconds`, `maxDelaySeconds`, `pollSeconds`. Leave out
   `repo` for a room that is only kept on the server.
 

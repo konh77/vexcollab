@@ -395,3 +395,69 @@ test('chat history is kept across a restart, and a damaged file is ignored', asy
   assert.deepEqual(fourth.chat, []);
   await fourth.stop();
 });
+
+test('pull brings the repository in but sends nothing back; push saves the room right now', async () => {
+  const env = remote({ 'main.py': 'one\n', 'other.py': 'o\n' });
+  const { pinned, doc } = await room(env);
+  const remoteTip = () => git(env.root, '--git-dir', env.bare, 'rev-parse', 'main');
+  const start = remoteTip();
+
+  // Both sides change: the room edits one file, a colleague pushes another.
+  edit(doc, 'other.py', 'edited in the room\n');
+  const them = colleague(env);
+  them.write('main.py', 'from the repo\n');
+  them.push('repo change');
+  const colleaguesTip = remoteTip();
+
+  const pulled = await pinned.cycle({ push: false });
+  assert.equal(pulled.pulled, 1, 'one file came in');
+  assert.equal(pulled.pushed, 0, 'and nothing went out');
+  assert.equal(read(doc, 'main.py'), 'from the repo\n');
+  assert.equal(read(doc, 'other.py'), 'edited in the room\n', 'the room keeps its own edit');
+  assert.equal(remoteTip(), colleaguesTip, 'the repository is exactly as the colleague left it');
+  assert.notEqual(colleaguesTip, start);
+
+  const pushed = await pinned.cycle();
+  assert.equal(pushed.pushed, 1, 'now the room edit goes out');
+  assert.notEqual(remoteTip(), colleaguesTip);
+  const check = join(env.root, 'check-manual');
+  git(env.root, 'clone', '-q', env.bare, check);
+  assert.equal(readFileSync(join(check, 'other.py'), 'utf8'), 'edited in the room\n');
+  assert.equal(readFileSync(join(check, 'main.py'), 'utf8'), 'from the repo\n', 'the colleague\'s change survived');
+
+  const again = await pinned.cycle({ push: false });
+  assert.equal(again.pulled, 0, 'a second pull finds nothing new');
+  await pinned.stop();
+});
+
+test('what a sync says to the person who pressed the button', async () => {
+  const { describeSync } = await load();
+  assert.deepEqual(describeSync('pull', { state: 'idle', message: null, pulled: 0, pushed: 0 }), { ok: true, summary: 'Already up to date with the repository.' });
+  assert.equal(describeSync('pull', { state: 'idle', message: null, pulled: 1, pushed: 0 }).summary, 'Pulled changes to 1 file.');
+  assert.equal(describeSync('pull', { state: 'idle', message: null, pulled: 3, pushed: 0 }).summary, 'Pulled changes to 3 files.');
+  assert.equal(describeSync('push', { state: 'idle', message: null, pulled: 0, pushed: 2 }).summary, 'Pushed 2 commits.');
+  assert.equal(describeSync('push', { state: 'idle', message: null, pulled: 2, pushed: 1 }).summary, 'Pushed 1 commit. Pulled changes to 2 files.');
+  assert.match(describeSync('push', { state: 'idle', message: null, pulled: 0, pushed: 0 }).summary, /Nothing new to push/);
+  const conflict = describeSync('push', { state: 'conflict', message: 'main.py changed in both', pulled: 0, pushed: 0 });
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.summary, 'main.py changed in both');
+  assert.equal(describeSync('pull', { state: 'error', message: 'Could not reach the repository', pulled: 0, pushed: 0 }).ok, false);
+  assert.equal(describeSync('pull', undefined).ok, false);
+});
+
+test('a conflict is reported to the person who pushed, with nothing overwritten', async () => {
+  const { describeSync } = await load();
+  const env = remote({ 'main.py': 'shared\n' });
+  const { pinned, doc } = await room(env);
+  edit(doc, 'main.py', 'room version\n');
+  const them = colleague(env);
+  them.write('main.py', 'repo version\n');
+  them.push('conflicting');
+  const tip = git(env.root, '--git-dir', env.bare, 'rev-parse', 'main');
+  const result = await pinned.cycle();
+  const said = describeSync('push', result);
+  assert.equal(said.ok, false);
+  assert.match(said.summary, /Nothing was overwritten|changed in both/);
+  assert.equal(git(env.root, '--git-dir', env.bare, 'rev-parse', 'main'), tip);
+  await pinned.stop();
+});

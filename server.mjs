@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
-import { PinnedRoom, loadPinnedConfig, verifyPasscode } from './pinned-rooms.mjs';
+import { PinnedRoom, describeSync, loadPinnedConfig, verifyPasscode } from './pinned-rooms.mjs';
 import { visiblePeers } from './room-peers.mjs';
 
 // Load .env.local before anything reads process.env. Node has done this
@@ -639,6 +639,28 @@ io.on('connection', (socket) => {
     if (peer.idle === idle) return;
     peer.idle = idle;
     io.to(joinedRoom).emit('peers', visiblePeers(room.peers));
+  });
+
+  // Pull from or push to the repository now, instead of waiting for the autosave.
+  // Anyone who got into the room -- past its passcode -- may, as they may edit it.
+  socket.on('pinned-sync', async (request, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = joinedRoom ? rooms.get(joinedRoom) : null;
+    if (!room?.pinned || !room.peers.has(socket.id)) {
+      return reply({ ok: false, summary: 'This room is not connected to a repository.' });
+    }
+    const action = request?.action === 'pull' || request?.action === 'push' ? request.action : null;
+    if (!action) return reply({ ok: false, summary: 'Unknown action.' });
+
+    // A button held down must not queue a stack of network round trips.
+    const now = Date.now();
+    if (now - (room.lastManualSync ?? 0) < 3000) {
+      return reply({ ok: false, summary: 'Just a moment — it is still working on the last one.' });
+    }
+    room.lastManualSync = now;
+
+    const result = await room.pinned.cycle({ push: action === 'push' });
+    reply(describeSync(action, result));
   });
 
   socket.on('chat', (text, ack) => {
