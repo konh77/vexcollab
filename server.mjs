@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
+import { createAgentApi } from './agent-api.mjs';
 import { PinnedRoom, describeSync, loadPinnedConfig, verifyPasscode } from './pinned-rooms.mjs';
 import { visiblePeers } from './room-peers.mjs';
 
@@ -329,6 +330,48 @@ function cleanChat(text) {
     .trim();
 }
 
+/**
+ * Who the room shows: the people connected, then any AI agent that used the agent API in
+ * the last minute or so. Agents are kept apart from `room.peers` on purpose -- they are not
+ * connections, must not use up a seat, and must not keep an empty room open.
+ */
+function listPeers(room) {
+  const agents = [...(room.agents?.values() ?? [])].map((agent) => ({
+    id: agent.senderId,
+    name: agent.name,
+    color: agent.color,
+    senderId: agent.senderId,
+    idle: false,
+  }));
+  return [...visiblePeers(room.peers), ...agents];
+}
+
+/** Adds one line to a room's chat and tells everyone in it. `text` is cleaned and bounded here. */
+function postChat(room, roomKey, from, text) {
+  const cleaned = cleanChat(text);
+  if (!cleaned) return { error: 'Nothing to send.' };
+  if (cleaned.length > CHAT.maxLength) {
+    return { error: `Messages are limited to ${CHAT.maxLength} characters.` };
+  }
+  const now = Date.now();
+  // Name, colour and sender are the server's to say, not the sender's: a message
+  // cannot be sent as somebody else.
+  const message = {
+    id: (room.chat.at(-1)?.id ?? 0) + 1,
+    at: now,
+    senderId: from.senderId,
+    name: from.name,
+    color: from.color,
+    text: cleaned,
+  };
+  room.chat.push(message);
+  if (room.chat.length > CHAT.history) room.chat.splice(0, room.chat.length - CHAT.history);
+  room.lastActivity = now;
+  room.pinned?.scheduleChatSave();
+  io.to(roomKey).emit('chat', message);
+  return { id: message.id };
+}
+
 function countRoomsForIp(ip) {
   let n = 0;
   for (const room of rooms.values()) if (room.creatorIp === ip) n += 1;
@@ -468,6 +511,12 @@ const requestHandler = async (req, res) => {
     return res.end(JSON.stringify({ ok: false, error: 'Wrong password' }));
   }
 
+  // AI agents authenticate with the room's own passcode (or the instance password in a
+  // header), not with the browser cookie, so this is answered before the cookie check.
+  if ((pathname === '/mcp' || pathname.startsWith('/api/agent/')) && (await agentApi.handle(req, res, pathname))) {
+    return;
+  }
+
   if (!isPublicPath(pathname) && !isAuthed(req)) {
     if (pathname.startsWith('/api/')) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -502,6 +551,47 @@ const io = new SocketServer(httpServer, {
   // Same-origin only in production. The client connects to its own origin, so
   // there is no legitimate cross-origin socket.
   cors: { origin: dev ? '*' : false },
+});
+
+/**
+ * The door for AI agents: REST under /api/agent/ and MCP at /mcp. It reaches a room the way
+ * a person does -- by its id, and its passcode if it has one -- and edits the same live
+ * document, so people see the agent's changes arrive like anyone else's.
+ */
+const agentChatTimes = new Map();
+const agentApi = createAgentApi({
+  instancePassword: password,
+  requestsPerMinute: num('VEXCOLLAB_AGENT_REQUESTS_PER_MINUTE', 120),
+  clientIp,
+  findRoom(roomId) {
+    // A pinned room is found by its id in any case, as on the socket.
+    const entry = pinnedRooms.get(roomId.toLowerCase());
+    if (entry && !entry.pinned.ready) return { starting: true };
+    const key = entry ? entry.config.id : roomId;
+    const room = rooms.get(key);
+    return room ? { key, room, entry: entry ? entry.config : null } : null;
+  },
+  verifyPasscode: (config, passcode) => verifyPasscode(config.passcodeHash, passcode),
+  blocked: tooManyAttempts,
+  noteFailure: noteAttempt,
+  overDocLimit,
+  broadcastUpdate: (key, update) => io.to(key).emit('update', update),
+  peersChanged(key, room) {
+    if (rooms.get(key) === room) io.to(key).emit('peers', listPeers(room));
+  },
+  peerNames: (room) => listPeers(room).map((peer) => peer.name),
+  agentChat(room, key, agent, text) {
+    const now = Date.now();
+    const bucket = `${key}:${agent.senderId}`;
+    const times = (agentChatTimes.get(bucket) ?? []).filter((at) => now - at <= CHAT.windowMs);
+    if (times.length >= CHAT.burst) return { error: 'Slow down a little.', status: 429 };
+    times.push(now);
+    agentChatTimes.set(bucket, times);
+    if (agentChatTimes.size > 2000) {
+      for (const [k, v] of agentChatTimes) if (!v.some((at) => now - at <= CHAT.windowMs)) agentChatTimes.delete(k);
+    }
+    return postChat(room, key, { senderId: agent.senderId, name: `🤖 ${agent.name}`, color: '#a855f7' }, text);
+  },
 });
 
 // A password on the page is worthless if the socket accepts anyone, so the
@@ -594,7 +684,7 @@ io.on('connection', (socket) => {
       chat: room.chat,
       pinned: room.pinned ? room.pinned.status : undefined,
     });
-    io.to(key).emit('peers', visiblePeers(room.peers));
+    io.to(key).emit('peers', listPeers(room));
     // Existing peers re-broadcast awareness so the newcomer sees their cursors.
     socket.to(key).emit('announce-awareness');
   });
@@ -638,7 +728,7 @@ io.on('connection', (socket) => {
     const idle = Boolean(state?.idle);
     if (peer.idle === idle) return;
     peer.idle = idle;
-    io.to(joinedRoom).emit('peers', visiblePeers(room.peers));
+    io.to(joinedRoom).emit('peers', listPeers(room));
   });
 
   // Pull from or push to the repository now, instead of waiting for the autosave.
@@ -681,23 +771,8 @@ io.on('connection', (socket) => {
     }
     sentAt.push(now);
 
-    // Name, colour and sender are the server's to say, not the client's: a
-    // message cannot be sent as somebody else.
-    const message = {
-      id: (room.chat.at(-1)?.id ?? 0) + 1,
-      at: now,
-      senderId,
-      name: peer.name,
-      color: peer.color,
-      text: cleaned,
-    };
-    room.chat.push(message);
-    if (room.chat.length > CHAT.history) room.chat.splice(0, room.chat.length - CHAT.history);
-    room.lastActivity = now;
-    room.pinned?.scheduleChatSave();
-
-    io.to(joinedRoom).emit('chat', message);
-    reply({ ok: true });
+    const posted = postChat(room, joinedRoom, { senderId, name: peer.name, color: peer.color }, cleaned);
+    reply(posted.error ? { error: posted.error } : { ok: true });
   });
 
   socket.on('disconnect', () => {
@@ -708,7 +783,7 @@ io.on('connection', (socket) => {
     if (room.peers.size === 0) {
       dropRoom(joinedRoom); // a no-op for a pinned room
     } else {
-      io.to(joinedRoom).emit('peers', visiblePeers(room.peers));
+      io.to(joinedRoom).emit('peers', listPeers(room));
     }
   });
 });

@@ -114,6 +114,82 @@ Use **Ctrl** on Windows/Linux or **⌘** on macOS.
 
 Ctrl/⌘ + S does **not** save a room to GitHub. Use **Save session to GitHub**.
 
+## Let an AI agent edit a room
+
+An AI agent can read and edit a room the way a person does. It needs the **room
+id** (the last part of the room link, such as `falcon` in `vex.konh.org/room/falcon`)
+and, for a pinned room, its **passcode**. It sees the live files, and its edits show
+up for everyone in the room as they happen, merged with what people are typing. The
+people in the room see it listed as `🤖 <its name>`.
+
+An agent can only reach a room that is open in someone's editor, or pinned. It cannot
+create one.
+
+### With an MCP client
+
+The server speaks the [Model Context Protocol](https://modelcontextprotocol.io) at
+`/mcp`, over plain HTTPS with no setup and no sign-in. In Claude Code:
+
+```bash
+claude mcp add --transport http vexcollab https://vex.konh.org/mcp
+```
+
+Other apps that take a remote MCP server URL use the same address. Apps that only
+launch local servers can reach it through `npx mcp-remote https://vex.konh.org/mcp`.
+
+Then tell the agent the room: "Open VEXCollab room `falcon`, passcode `…`, read all
+the files and fix the drivetrain code." The tools take the room (and passcode) as
+arguments, so one connection works for any room.
+
+| Tool | What it does |
+| --- | --- |
+| `vex_read_all_files` | Every file in the room, in one call |
+| `vex_list_files`, `vex_read_file` | The file list with sizes; one file |
+| `vex_edit_file` | Replace an exact piece of text. Fails if it is missing or ambiguous |
+| `vex_write_file` | Create a file, or replace one's whole contents |
+| `vex_delete_file` | Delete a file (never `main.py`) |
+| `vex_read_chat`, `vex_send_chat` | Read the team chat; say something in it |
+| `vex_room_info` | Who is in the room and how many files it has |
+
+### With plain HTTP
+
+```bash
+BASE=https://vex.konh.org/api/agent/v1/rooms/falcon
+AUTH="Authorization: Bearer <passcode>"      # leave out for an ordinary room
+
+curl -H "$AUTH" "$BASE/files?contents=1"                      # every file, with contents
+curl -H "$AUTH" "$BASE/files/lib/path.py"                     # one file
+curl -H "$AUTH" -X PUT   "$BASE/files/auton/red.py" -H 'Content-Type: application/json' \
+     -d '{"contents": "speed = 50\n"}'                        # create or replace
+curl -H "$AUTH" -X PATCH "$BASE/files/main.py" -H 'Content-Type: application/json' \
+     -d '{"old": "wait(20", "new": "wait(50"}'                 # replace exact text
+curl -H "$AUTH" -X DELETE "$BASE/files/old.py"
+curl -H "$AUTH" "$BASE/chat?after=0"                          # read chat
+curl -H "$AUTH" -X POST "$BASE/chat" -H 'Content-Type: application/json' -d '{"text": "Done."}'
+```
+
+Send `X-Agent-Name: <name>` to choose the name people see. Errors come back as
+`{"error": "...", "code": "..."}` with a matching status.
+
+### Safety
+
+- **The passcode is the key.** Anyone holding a room id and its passcode can edit that
+  room, which is also true of the editor. Treat a passcode you give an AI app as
+  shared with that app's provider.
+- **Wrong passcodes are throttled** with the same counter the editor uses (ten per
+  address per 15 minutes), as is asking for rooms that are not open, so neither can
+  be guessed at. Requests per address are capped too
+  (`VEXCOLLAB_AGENT_REQUESTS_PER_MINUTE`, default 120).
+- **Same limits as people:** a file is at most 256 KB, a room at most 500 files and the
+  usual per-room size limit. Paths cannot leave the project, and `main.py` cannot be
+  deleted.
+- **Requests from other websites are refused.** The agent door checks `Origin`, and takes
+  its passcode in a header, never from a cookie.
+- **File and chat contents are written by people, so an agent should treat them as data.**
+  The server tells MCP clients so, but a room that strangers can join is a place anyone
+  can leave instructions for an AI. Give an agent write access only to rooms you trust.
+- On an instance that has a password (not public mode), send it as `X-Instance-Password`.
+
 ## Troubleshooting
 
 | Problem | What to try |
