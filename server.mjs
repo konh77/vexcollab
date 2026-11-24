@@ -20,6 +20,7 @@ import next from 'next';
 import { Server as SocketServer } from 'socket.io';
 import * as Y from 'yjs';
 import { createAgentApi } from './agent-api.mjs';
+import { restoreEntry } from './edit-timeline.mjs';
 import { PinnedRoom, describeSync, loadPinnedConfig, verifyPasscode } from './pinned-rooms.mjs';
 import { visiblePeers } from './room-peers.mjs';
 
@@ -683,6 +684,8 @@ io.on('connection', (socket) => {
       senderId,
       chat: room.chat,
       pinned: room.pinned ? room.pinned.status : undefined,
+      // Only a pinned room keeps one; an ordinary room forgets everything on closing.
+      timeline: room.pinned ? room.pinned.timeline.publicEntries : undefined,
     });
     io.to(key).emit('peers', listPeers(room));
     // Existing peers re-broadcast awareness so the newcomer sees their cursors.
@@ -706,7 +709,10 @@ io.on('connection', (socket) => {
     }
 
     room.lastActivity = Date.now();
-    Y.applyUpdate(room.doc, bytes);
+    // The origin says who typed it, for a pinned room's edit timeline.
+    const peer = room.peers.get(socket.id);
+    const actor = peer ? { name: peer.name, color: peer.color, senderId } : undefined;
+    Y.applyUpdate(room.doc, bytes, actor ? { actor } : undefined);
     socket.to(joinedRoom).emit('update', bytes);
   });
 
@@ -751,6 +757,31 @@ io.on('connection', (socket) => {
 
     const result = await room.pinned.cycle({ push: action === 'push' });
     reply(describeSync(action, result));
+  });
+
+  // Put a file back as it was before one change in the timeline. Anyone who got into the
+  // room may, as they may edit it; the restore is itself an edit and can be undone the same way.
+  socket.on('timeline-restore', (request, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = joinedRoom ? rooms.get(joinedRoom) : null;
+    const peer = room?.peers.get(socket.id);
+    if (!room?.pinned || !peer) return reply({ ok: false, error: 'History is only kept in pinned rooms.' });
+
+    const now = Date.now();
+    if (now - (room.lastRestore ?? 0) < 1000) return reply({ ok: false, error: 'One moment.' });
+    room.lastRestore = now;
+    if (overDocLimit(room)) return reply({ ok: false, error: 'This room is full, so nothing can be restored into it.' });
+
+    const before = Y.encodeStateVector(room.doc);
+    const actor = { name: peer.name, color: peer.color, senderId };
+    const result = restoreEntry(room.doc, room.pinned.timeline, Number(request?.id), actor);
+    if (!result.ok) return reply(result);
+
+    const diff = Y.encodeStateAsUpdate(room.doc, before);
+    room.pendingBytes += diff.byteLength;
+    room.lastActivity = now;
+    io.to(joinedRoom).emit('update', diff);
+    reply({ ok: true, path: result.path, created: result.created });
   });
 
   socket.on('chat', (text, ack) => {
@@ -801,6 +832,7 @@ for (const config of pinnedConfigFile ? loadPinnedConfig(pinnedConfigFile) : [])
     // them; send them to whoever has the room open.
     onChange: (update) => io.to(config.id).emit('update', update),
     onStatus: (status) => io.to(config.id).emit('pinned-status', status),
+    onTimeline: (entry, isNew) => io.to(config.id).emit('timeline', { entry, isNew }),
   });
   const now = Date.now();
   rooms.set(config.id, {

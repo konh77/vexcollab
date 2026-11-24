@@ -20,6 +20,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import * as Y from 'yjs';
 import { safeRelative } from './pinned-rooms.mjs';
+import { replaceMinimal } from './text-diff.mjs';
 
 const FILES_KEY = 'files';
 const ENTRY_FILE = 'main.py';
@@ -72,41 +73,6 @@ function readPath(doc, path) {
   return isText(text) ? text.toString() : null;
 }
 
-const isHigh = (code) => code >= 0xd800 && code <= 0xdbff;
-const isLow = (code) => code >= 0xdc00 && code <= 0xdfff;
-
-/**
- * Turns `before` into `after` by replacing only the part in the middle that differs.
- * Deleting the whole text and inserting it again would move every person's cursor to the
- * top of the file and cancel keystrokes that are in flight; changing only the span that
- * differs leaves the rest of the text, and the people editing it, where they were.
- */
-export function replaceMinimal(text, before, after) {
-  let start = 0;
-  const max = Math.min(before.length, after.length);
-  while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start += 1;
-  // Never cut a character that is stored as two UTF-16 units in half.
-  if (start > 0 && isHigh(before.charCodeAt(start - 1))) start -= 1;
-
-  let endBefore = before.length;
-  let endAfter = after.length;
-  while (
-    endBefore > start &&
-    endAfter > start &&
-    before.charCodeAt(endBefore - 1) === after.charCodeAt(endAfter - 1)
-  ) {
-    endBefore -= 1;
-    endAfter -= 1;
-  }
-  if (endBefore < before.length && isLow(before.charCodeAt(endBefore))) {
-    endBefore += 1;
-    endAfter += 1;
-  }
-
-  if (endBefore > start) text.delete(start, endBefore - start);
-  if (endAfter > start) text.insert(start, after.slice(start, endAfter));
-}
-
 function checkText(contents) {
   if (typeof contents !== 'string') throw new ApiError(400, 'bad-request', '"contents" must be a string.');
   if (contents.includes('\0')) throw new ApiError(400, 'binary', 'Only text files can be written.');
@@ -137,9 +103,11 @@ function mutate(ctx, change) {
   }
   const before = Y.encodeStateVector(room.doc);
   let result;
+  // The origin says who made the change, for the room's edit timeline.
+  const actor = { name: `🤖 ${ctx.agent.name}`, color: AGENT_COLOR, senderId: ctx.agent.senderId };
   room.doc.transact(() => {
     result = change(room.doc);
-  }, 'agent');
+  }, { actor, agent: true });
   if (result && result.changed === false) return result;
   const diff = Y.encodeStateAsUpdate(room.doc, before);
   room.pendingBytes += diff.byteLength;

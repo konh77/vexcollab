@@ -23,12 +23,16 @@ import { mkdir, readdir, readFile, rename, rm, writeFile, lstat } from 'node:fs/
 import { dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import * as Y from 'yjs';
+import { EditTimeline, defaultActor } from './edit-timeline.mjs';
 
 const run = promisify(execFile);
 const deriveKey = promisify(scrypt);
 
 /** Origin tag for document changes this module makes, so they can be relayed. */
 export const PINNED_ORIGIN = 'vexcollab-pinned';
+
+/** What the timeline calls changes that came from the repository rather than a person. */
+const GIT_ACTOR = { name: 'Git sync', color: '#8b949e', senderId: 'git' };
 
 const FILES_KEY = 'files';
 
@@ -248,9 +252,10 @@ export class PinnedRoom {
    * @param {Y.Doc} options.doc the room's authoritative document
    * @param {(update: Uint8Array) => void} [options.onChange] a change made here
    * @param {(status: object) => void} [options.onStatus]
+   * @param {(entry: object, isNew: boolean) => void} [options.onTimeline] an entry was added or grew
    * @param {(line: string) => void} [options.log]
    */
-  constructor({ config, dataDir, doc, onChange, onStatus, log = console.log }) {
+  constructor({ config, dataDir, doc, onChange, onStatus, onTimeline, log = console.log }) {
     this.config = config;
     this.doc = doc;
     this.onChange = onChange;
@@ -268,6 +273,21 @@ export class PinnedRoom {
      */
     this.chat = [];
     this.chatTimer = null;
+
+    /**
+     * Who changed which file, and when, with enough kept to take a change back. It
+     * starts watching only once the room is ready, so the first import from the
+     * repository is the starting point and not a hundred "created" lines.
+     */
+    this.timelineFile = join(this.base, 'timeline.json');
+    this.timelineTimer = null;
+    this.timeline = new EditTimeline(doc, {
+      actorOf: (origin) => (origin === PINNED_ORIGIN ? GIT_ACTOR : defaultActor(origin)),
+      onChange: (entry, isNew) => {
+        onTimeline?.(entry, isNew);
+        this.scheduleTimelineSave();
+      },
+    });
 
     this.ready = false;
     this.state = 'starting';
@@ -316,6 +336,7 @@ export class PinnedRoom {
   async start() {
     await mkdir(this.base, { recursive: true, mode: 0o700 });
     await this.loadChat();
+    await this.loadTimeline();
 
     let restored = false;
     if (existsSync(this.snapshotFile)) {
@@ -340,6 +361,7 @@ export class PinnedRoom {
 
     if (!this.hasRemote()) {
       this.ready = true;
+      this.timeline.start();
       this.setState('local', 'Kept on this server only; no repository is connected.');
       this.beginTimer();
       return;
@@ -351,6 +373,7 @@ export class PinnedRoom {
         await this.prepareRepo();
         if (!restored) await this.importFresh();
         this.ready = true;
+        this.timeline.start();
         this.setState('idle');
         this.beginTimer();
         void this.cycle();
@@ -362,6 +385,7 @@ export class PinnedRoom {
         // then collides with. Stay closed and keep trying instead.
         if (restored) {
           this.ready = true;
+          this.timeline.start();
           this.beginTimer();
         } else {
           setTimeout(attempt, 60_000).unref?.();
@@ -376,8 +400,11 @@ export class PinnedRoom {
     if (this.timer) clearInterval(this.timer);
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.chatTimer) clearTimeout(this.chatTimer);
+    if (this.timelineTimer) clearTimeout(this.timelineTimer);
+    this.timeline.stop();
     await this.saveSnapshot().catch(() => {});
     await this.saveChat().catch(() => {});
+    await this.saveTimeline().catch(() => {});
   }
 
   markDirty() {
@@ -439,6 +466,32 @@ export class PinnedRoom {
     const temporary = `${this.chatFile}.${process.pid}.tmp`;
     await writeFile(temporary, JSON.stringify(this.chat), { mode: 0o600 });
     await rename(temporary, this.chatFile);
+  }
+
+  async loadTimeline() {
+    try {
+      this.timeline.load(JSON.parse(await readFile(this.timelineFile, 'utf8')));
+    } catch {
+      // No timeline yet, or it could not be read; start with none.
+    }
+  }
+
+  /** Less often than chat: the file holds saved versions of files, so it can be large. */
+  scheduleTimelineSave() {
+    if (this.timelineTimer || this.stopped) return;
+    this.timelineTimer = setTimeout(() => {
+      this.timelineTimer = null;
+      void this.saveTimeline().catch((error) =>
+        this.log(`  Pinned room "${this.config.id}": could not save its timeline (${error.message}).`),
+      );
+    }, 10_000);
+    this.timelineTimer.unref?.();
+  }
+
+  async saveTimeline() {
+    const temporary = `${this.timelineFile}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(this.timeline), { mode: 0o600 });
+    await rename(temporary, this.timelineFile);
   }
 
   async saveSnapshot() {

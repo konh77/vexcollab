@@ -52,6 +52,23 @@ export interface ChatMessage {
   text: string;
 }
 
+/** One change in a pinned room's edit timeline, as the server recorded it. */
+export interface TimelineEntry {
+  id: number;
+  /** Milliseconds since the epoch; for a run of typing, when it last grew. */
+  at: number;
+  who: { name: string; color: string; senderId: string };
+  kind: 'edit' | 'create' | 'delete';
+  path: string;
+  added: number;
+  removed: number;
+  /** Whether the file as it was just before this change was kept, so it can be put back. */
+  restorable: boolean;
+}
+
+/** The most entries kept on the page; the server holds as many. */
+const TIMELINE_KEPT = 300;
+
 /** The most messages kept on the page; the server holds fewer. */
 const CHAT_KEPT = 200;
 
@@ -113,6 +130,9 @@ export class CollabProvider {
   private passcodeListeners = new Set<(reason: PasscodeReason | null) => void>();
   private pinnedListeners = new Set<(status: PinnedStatus | null) => void>();
   private chatListeners = new Set<(messages: ChatMessage[], selfId: string | null) => void>();
+  private timelineListeners = new Set<(entries: TimelineEntry[] | null) => void>();
+  /** Null in an ordinary room, which keeps no timeline. */
+  private timelineEntries: TimelineEntry[] | null = null;
   private lastTouched = Date.now();
   private hiddenSince: number | null = null;
   private away = false;
@@ -200,6 +220,17 @@ export class CollabProvider {
       this.pinnedListeners.forEach((l) => l(status)),
     );
 
+    this.socket.on('timeline', ({ entry }: { entry: TimelineEntry }) => {
+      if (!this.timelineEntries) return;
+      // A run of typing grows its last entry in place; anything else adds one. Either
+      // may also be in the list the join already delivered.
+      const known = this.timelineEntries.some((existing) => existing.id === entry.id);
+      this.timelineEntries = known
+        ? this.timelineEntries.map((existing) => (existing.id === entry.id ? entry : existing))
+        : [...this.timelineEntries, entry].slice(-TIMELINE_KEPT);
+      this.emitTimeline();
+    });
+
     this.socket.on('chat', (message: ChatMessage) => {
       // A join's history and a live message can overlap around a reconnect.
       if (this.chatMessages.some((existing) => existing.id === message.id)) return;
@@ -271,6 +302,7 @@ export class CollabProvider {
         pinned?: PinnedStatus;
         senderId?: string;
         chat?: ChatMessage[];
+        timeline?: TimelineEntry[];
       }) => {
         if (this.destroyed) return;
 
@@ -306,6 +338,8 @@ export class CollabProvider {
         if (this.away) this.socket.emit('presence', { idle: true });
         this.chatMessages = (res.chat ?? []).slice(-CHAT_KEPT);
         this.emitChat();
+        this.timelineEntries = res.timeline ? res.timeline.slice(-TIMELINE_KEPT) : null;
+        this.emitTimeline();
         if (passcode) rememberPasscode(this.roomId, passcode);
         Y.applyUpdate(this.doc, new Uint8Array(res.update), this);
         this.broadcastLocalAwareness();
@@ -313,6 +347,10 @@ export class CollabProvider {
         this.syncedListeners.forEach((l) => l());
       },
     );
+  }
+
+  private emitTimeline() {
+    this.timelineListeners.forEach((l) => l(this.timelineEntries));
   }
 
   private emitChat() {
@@ -349,6 +387,30 @@ export class CollabProvider {
           resolve(res);
         });
     });
+  }
+
+  /**
+   * Puts a file back as it was just before one change. Resolves to null when it worked,
+   * or the reason it did not. The restored text arrives like any other edit.
+   */
+  restoreFromTimeline(id: number): Promise<string | null> {
+    return new Promise((resolve) => {
+      if (!this.socket.connected) return resolve('You are offline. Reconnecting…');
+      this.socket
+        .timeout(8000)
+        .emit('timeline-restore', { id }, (error: Error | null, res?: { ok?: boolean; error?: string }) => {
+          if (error) return resolve('No answer from the server. Try again.');
+          resolve(res?.ok ? null : (res?.error ?? 'That could not be restored.'));
+        });
+    });
+  }
+
+  onTimeline(listener: (entries: TimelineEntry[] | null) => void) {
+    this.timelineListeners.add(listener);
+    listener(this.timelineEntries);
+    return () => {
+      this.timelineListeners.delete(listener);
+    };
   }
 
   onChat(listener: (messages: ChatMessage[], selfId: string | null) => void) {
