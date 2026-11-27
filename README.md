@@ -367,16 +367,6 @@ a passcode or token never has to be committed. The server reads
   room to the repository now, pulling anything new first. Each says what it did
   ("Pulled changes to 2 files", "Pushed 1 commit", or why it could not). Anyone
   past the passcode can use them, as they can edit the room.
-- **History.** A pinned room keeps a timeline of changes — who changed which file,
-  when, and how much — in a collapsible *History* box below the GitHub one. *Put
-  it back as it was* returns a file to how it looked just before a change (and
-  *Bring the file back* undoes a deletion). Undoing is an edit like any other, so
-  it shows in the timeline and can itself be undone. A burst of typing in one file
-  is one entry. AI agents and pulls from the repository appear too ("🤖 name", "Git
-  sync"). Only pinned rooms have it: an ordinary room forgets everything when it
-  closes, and a record of who typed what would break that. The last 300 changes are
-  kept, with the earlier version of each file up to 64 KB and about 6 MB in all, in
-  `timeline.json` beside the room's state.
 - Optional: `debounceSeconds`, `maxDelaySeconds`, `pollSeconds`. Leave out
   `repo` for a room that is only kept on the server.
 

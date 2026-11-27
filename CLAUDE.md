@@ -28,7 +28,6 @@ on the same room URL.
 | `server.mjs` | Next + Socket.IO relay. Owns the authoritative `Y.Doc` per room, in memory. |
 | `src/lib/collab/` | Client half of collaboration: `CollabProvider`, identity, the shared file model. |
 | `src/lib/vex/` | Everything V5: `session.ts` (observable brain store), `terminal.ts` (user serial port), `screen.ts` (framebuffer), `program.ts` (payload + starter files). |
-| `edit-timeline.mjs` | A pinned room's history of who changed which file, with the earlier version of each so a change can be put back. Watches the room's `Y.Doc`; the transaction origin (`{ actor }`) says who made a change. Tested in `tests/timeline.test.cjs`. |
 | `agent-api.mjs` | The door for AI agents: REST under `/api/agent/v1/` and MCP at `/mcp`. Edits the room's live `Y.Doc` in place; reached by room id + passcode, never by cookie. Tested in `tests/agent-api.test.cjs`. |
 | `pinned-rooms.mjs` | Pinned rooms: rooms that never close, with a passcode and Git autosave. Generic; the rooms themselves are declared in a config file on the server, never in this repo. |
 | `src/lib/v5-serial-protocol/` | **Vendored third-party code. Do not edit.** |

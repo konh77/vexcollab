@@ -6,14 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type * as Y from 'yjs';
-import {
-  CollabProvider,
-  type ChatMessage,
-  type PasscodeReason,
-  type Peer,
-  type PinnedStatus,
-  type TimelineEntry,
-} from './provider';
+import { CollabProvider, type ChatMessage, type PasscodeReason, type Peer, type PinnedStatus } from './provider';
 import { loadIdentity } from './identity';
 import { ensureStarterFiles, getFiles, listPaths } from './project';
 
@@ -32,8 +25,6 @@ export interface CollabState {
   messages: ChatMessage[];
   /** Which messages are yours. Null until the room has been joined. */
   selfId: string | null;
-  /** The room's edit timeline, oldest first. Null in an ordinary room, which keeps none. */
-  timeline: TimelineEntry[] | null;
 }
 
 export function useCollab(roomId: string, templateId?: string | null): CollabState {
@@ -46,7 +37,6 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
   const [pinned, setPinned] = useState<PinnedStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selfId, setSelfId] = useState<string | null>(null);
-  const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null);
 
   useEffect(() => {
     const instance = new CollabProvider(roomId, loadIdentity());
@@ -61,8 +51,6 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
       setMessages(next);
       setSelfId(self);
     });
-
-    const offTimeline = instance.onTimeline(setTimeline);
 
     const files = getFiles(instance.doc);
     const syncPaths = () => setPaths(listPaths(instance.doc));
@@ -85,7 +73,6 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
       offPasscode();
       offPinned();
       offChat();
-      offTimeline();
       files.unobserve(syncPaths);
       instance.destroy();
       setProvider(null);
@@ -93,5 +80,5 @@ export function useCollab(roomId: string, templateId?: string | null): CollabSta
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
-  return { provider, doc: provider?.doc ?? null, connected, peers, paths, error, passcode, pinned, messages, selfId, timeline };
+  return { provider, doc: provider?.doc ?? null, connected, peers, paths, error, passcode, pinned, messages, selfId };
 }

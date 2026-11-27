@@ -16,7 +16,6 @@ import { entryAtCursor, resolveSnippet } from '@/lib/vex/help';
 import { useV5Session, useV5Terminal } from '@/lib/vex/useV5';
 import { BrainPanel } from './BrainPanel';
 import { ChatPanel } from './ChatPanel';
-import { HistoryPanel } from './HistoryPanel';
 import { CommandPalette, type Command } from './CommandPalette';
 import { SearchPanel } from './SearchPanel';
 import { Settings } from './Settings';
@@ -49,7 +48,7 @@ export function Workspace({
   template?: string | null;
   repo?: string | null;
 }) {
-  const { provider, doc, connected, peers, paths, error, passcode, pinned, messages, selfId, timeline } = useCollab(roomId, template);
+  const { provider, doc, connected, peers, paths, error, passcode, pinned, messages, selfId } = useCollab(roomId, template);
   const { session, snapshot } = useV5Session();
   const { terminal, output, isOpen, series, clear } = useV5Terminal();
 
@@ -599,18 +598,7 @@ export function Workspace({
                   it gets instead is a way to pull and push on demand. */}
               {pinned ? (
                 provider && (
-                  <>
-                    <RepositoryPanel status={pinned} onSync={(action) => provider.syncPinned(action)} />
-                    {/* Only a pinned room keeps a timeline; an ordinary room forgets
-                        everything when it closes, and this would break that promise. */}
-                    {timeline && (
-                      <HistoryPanel
-                        entries={timeline}
-                        selfId={selfId}
-                        onRestore={(id) => provider.restoreFromTimeline(id)}
-                      />
-                    )}
-                  </>
+                  <RepositoryPanel status={pinned} onSync={(action) => provider.syncPinned(action)} />
                 )
               ) : (
                 <GitHubPanel doc={doc} roomId={roomId} />

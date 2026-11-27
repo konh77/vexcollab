@@ -36,7 +36,7 @@ async function harness({ instancePassword = null, requestsPerMinute = 1000 } = {
   Y.applyUpdate(mirror, Y.encodeStateAsUpdate(open.doc));
   // People's edits reach the browser too; the agent's arrive through broadcastUpdate.
   open.doc.on('update', (update, origin) => {
-    if (!origin?.agent) Y.applyUpdate(mirror, update);
+    if (origin !== 'agent') Y.applyUpdate(mirror, update);
   });
 
   const failures = new Map();
